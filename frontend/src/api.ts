@@ -1,4 +1,4 @@
-import type { Person, Account, Position } from "./types";
+import type { Person, Account, Position, ProjectionResponse } from "./types";
 
 const BASE = "/api";
 
@@ -51,3 +51,16 @@ export const updatePosition = (id: number, data: Partial<Position>) =>
   request<Position>(`${BASE}/positions/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deletePosition = (id: number) =>
   request<void>(`${BASE}/positions/${id}`, { method: "DELETE" });
+
+// Projection
+export const getProjection = (params: {
+  months?: number;
+  startDate?: string;
+  granularity?: string;
+}) => {
+  const query = new URLSearchParams();
+  if (params.months) query.set("months", String(params.months));
+  if (params.startDate) query.set("startDate", params.startDate);
+  if (params.granularity) query.set("granularity", params.granularity);
+  return request<ProjectionResponse>(`${BASE}/projection?${query.toString()}`);
+};
