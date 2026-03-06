@@ -5,6 +5,8 @@ import PersonsPage from "./pages/PersonsPage";
 import AccountsPage from "./pages/AccountsPage";
 import PositionsPage from "./pages/PositionsPage";
 import ProjectionPage from "./pages/ProjectionPage";
+import BankingBridgePage from "./pages/BankingBridgePage";
+import SettingsPage from "./pages/SettingsPage";
 
 function App() {
   return (
@@ -30,6 +32,12 @@ function App() {
           <NavLink to="/positionen">
             <span className="nav-icon">📋</span> Positionen
           </NavLink>
+          <NavLink to="/banking-bridge">
+            <span className="nav-icon">🔗</span> Banking Bridge
+          </NavLink>
+          <NavLink to="/einstellungen">
+            <span className="nav-icon">⚙️</span> Einstellungen
+          </NavLink>
         </nav>
       </aside>
       <main className="main-content">
@@ -39,6 +47,8 @@ function App() {
           <Route path="/personen" element={<PersonsPage />} />
           <Route path="/konten" element={<AccountsPage />} />
           <Route path="/positionen" element={<PositionsPage />} />
+          <Route path="/banking-bridge" element={<BankingBridgePage />} />
+          <Route path="/einstellungen" element={<SettingsPage />} />
         </Routes>
       </main>
     </div>

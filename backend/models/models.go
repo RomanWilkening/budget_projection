@@ -71,6 +71,12 @@ func (d *FlexDate) Scan(value interface{}) error {
 	return nil
 }
 
+// Setting stores application configuration as key-value pairs.
+type Setting struct {
+	Key   string `json:"key" gorm:"primaryKey"`
+	Value string `json:"value"`
+}
+
 // Person represents an individual who can own accounts.
 type Person struct {
 	ID        uint           `json:"id" gorm:"primaryKey"`
@@ -83,14 +89,15 @@ type Person struct {
 
 // Account represents a financial account that can be owned by one or more persons.
 type Account struct {
-	ID             uint           `json:"id" gorm:"primaryKey"`
-	Name           string         `json:"name" gorm:"not null"`
-	Balance        float64        `json:"balance" gorm:"default:0"`
-	Currency       string         `json:"currency" gorm:"default:EUR"`
-	Owners         []Person       `json:"owners,omitempty" gorm:"many2many:person_accounts;"`
-	CreatedAt      time.Time      `json:"createdAt"`
-	UpdatedAt      time.Time      `json:"updatedAt"`
-	DeletedAt      gorm.DeletedAt `json:"-" gorm:"index"`
+	ID                      uint           `json:"id" gorm:"primaryKey"`
+	Name                    string         `json:"name" gorm:"not null"`
+	Balance                 float64        `json:"balance" gorm:"default:0"`
+	Currency                string         `json:"currency" gorm:"default:EUR"`
+	BankingBridgeAccountID  *int           `json:"bankingBridgeAccountId,omitempty" gorm:"default:null"`
+	Owners                  []Person       `json:"owners,omitempty" gorm:"many2many:person_accounts;"`
+	CreatedAt               time.Time      `json:"createdAt"`
+	UpdatedAt               time.Time      `json:"updatedAt"`
+	DeletedAt               gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
 // FrequencyType defines how often a position recurs.

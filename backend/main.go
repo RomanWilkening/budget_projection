@@ -14,6 +14,9 @@ func main() {
 	// Initialize database
 	database.Init()
 
+	// Load settings from DB (e.g., Banking Bridge URL)
+	handlers.InitBridgeClientFromDB()
+
 	// Set up Gin router
 	router := setupRouter()
 
@@ -55,6 +58,9 @@ func setupRouter() *gin.Engine {
 			accounts.DELETE("/:id", handlers.DeleteAccount)
 			accounts.POST("/:id/owners", handlers.AddAccountOwner)
 			accounts.DELETE("/:id/owners/:personId", handlers.RemoveAccountOwner)
+			accounts.POST("/:id/link-banking-bridge", handlers.LinkBankingBridgeAccount)
+			accounts.POST("/:id/sync-balance", handlers.SyncAccountBalance)
+			accounts.GET("/:id/recurring-transactions", handlers.AnalyzeRecurringTransactions)
 		}
 
 		// Positions
@@ -69,6 +75,21 @@ func setupRouter() *gin.Engine {
 
 		// Projection
 		api.GET("/projection", handlers.GetProjection)
+
+		// Banking Bridge
+		bridge := api.Group("/banking-bridge")
+		{
+			bridge.GET("/status", handlers.GetBankingBridgeStatus)
+			bridge.GET("/accounts", handlers.ListBankingBridgeAccounts)
+			bridge.POST("/sync-all-balances", handlers.SyncAllBalances)
+		}
+
+		// Settings
+		settings := api.Group("/settings")
+		{
+			settings.GET("", handlers.GetSettings)
+			settings.PUT("", handlers.UpdateSettings)
+		}
 	}
 
 	// Serve frontend static files

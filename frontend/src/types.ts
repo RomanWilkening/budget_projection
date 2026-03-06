@@ -11,6 +11,7 @@ export interface Account {
   name: string;
   balance: number;
   currency: string;
+  bankingBridgeAccountId?: number | null;
   owners?: Person[];
   createdAt: string;
   updatedAt: string;
@@ -72,3 +73,54 @@ export interface ProjectionResponse {
   accounts: AccountProjection[];
   totals: ProjectionDataPoint[];
 }
+
+export interface BridgeAccount {
+  id: number;
+  name: string;
+  account_number: string;
+  iban: string;
+  bic: string;
+  account_type: string;
+  bank: string;
+  bank_code: string;
+  balance: number;
+  currency: string;
+  last_update: string;
+}
+
+export interface BridgeStatus {
+  configured: boolean;
+  connected: boolean;
+  url: string;
+  error?: string;
+}
+
+export interface RecurringPattern {
+  name: string;
+  counterpartIban: string;
+  description: string;
+  averageAmount: number;
+  medianAmount: number;
+  minAmount: number;
+  maxAmount: number;
+  isExpense: boolean;
+  frequency: string;
+  dayOfMonth: number | null;
+  occurrences: number;
+  confidence: number;
+  bookingText: string;
+  matchingPositionId?: number;
+  matchingPositionName?: string;
+  suggestedAction: "create" | "update" | "none";
+}
+
+export interface RecurringAnalysis {
+  accountId: number;
+  accountName: string;
+  analyzedFrom: string;
+  analyzedTo: string;
+  transactionCount: number;
+  patterns: RecurringPattern[];
+}
+
+export type Settings = Record<string, string>;

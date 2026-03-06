@@ -1,4 +1,4 @@
-import type { Person, Account, Position, ProjectionResponse } from "./types";
+import type { Person, Account, Position, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings } from "./types";
 
 const BASE = "/api";
 
@@ -64,3 +64,34 @@ export const getProjection = (params: {
   if (params.granularity) query.set("granularity", params.granularity);
   return request<ProjectionResponse>(`${BASE}/projection?${query.toString()}`);
 };
+
+// Banking Bridge
+export const getBankingBridgeStatus = () =>
+  request<BridgeStatus>(`${BASE}/banking-bridge/status`);
+export const getBankingBridgeAccounts = () =>
+  request<BridgeAccount[]>(`${BASE}/banking-bridge/accounts`);
+export const linkBankingBridgeAccount = (accountId: number, bankingBridgeAccountId: number | null) =>
+  request<Account>(`${BASE}/accounts/${accountId}/link-banking-bridge`, {
+    method: "POST",
+    body: JSON.stringify({ bankingBridgeAccountId }),
+  });
+export const syncAccountBalance = (accountId: number) =>
+  request<{ account: Account; oldBalance: number; newBalance: number; lastUpdate: string }>(
+    `${BASE}/accounts/${accountId}/sync-balance`,
+    { method: "POST" }
+  );
+export const syncAllBalances = () =>
+  request<{ synced: number; total: number; results: Array<{ accountId: number; accountName: string; oldBalance: number; newBalance: number; error?: string }> }>(
+    `${BASE}/banking-bridge/sync-all-balances`,
+    { method: "POST" }
+  );
+export const analyzeRecurringTransactions = (accountId: number, months?: number) => {
+  const query = months ? `?months=${months}` : "";
+  return request<RecurringAnalysis>(`${BASE}/accounts/${accountId}/recurring-transactions${query}`);
+};
+
+// Settings
+export const getSettings = () =>
+  request<Settings>(`${BASE}/settings`);
+export const updateSettings = (data: Settings) =>
+  request<Settings>(`${BASE}/settings`, { method: "PUT", body: JSON.stringify(data) });
