@@ -130,6 +130,31 @@ func TestAnalyzeRecurringTransactions_VariableAmounts(t *testing.T) {
 	if p.MaxAmount != 78.00 {
 		t.Errorf("Expected max amount 78.00, got %.2f", p.MaxAmount)
 	}
+	// Last transaction by date is 2024-04-05 with amount -76.20
+	if p.LastAmount != 76.20 {
+		t.Errorf("Expected last amount 76.20, got %.2f", p.LastAmount)
+	}
+}
+
+func TestAnalyzeRecurringTransactions_LastAmount(t *testing.T) {
+	// Transactions are NOT sorted by date to verify LastAmount picks the most recent
+	transactions := []BridgeTransaction{
+		{BookingDate: "2024-03-10", Name: "Telekom", Description: "Mobilfunk", Amount: -39.99, IBAN: "DE123", BookingText: "SEPA"},
+		{BookingDate: "2024-01-10", Name: "Telekom", Description: "Mobilfunk", Amount: -35.00, IBAN: "DE123", BookingText: "SEPA"},
+		{BookingDate: "2024-04-10", Name: "Telekom", Description: "Mobilfunk", Amount: -42.50, IBAN: "DE123", BookingText: "SEPA"},
+		{BookingDate: "2024-02-10", Name: "Telekom", Description: "Mobilfunk", Amount: -37.00, IBAN: "DE123", BookingText: "SEPA"},
+	}
+
+	patterns := AnalyzeRecurringTransactions(transactions)
+	if len(patterns) != 1 {
+		t.Fatalf("Expected 1 pattern, got %d", len(patterns))
+	}
+
+	p := patterns[0]
+	// Most recent transaction is 2024-04-10 with amount -42.50
+	if p.LastAmount != 42.50 {
+		t.Errorf("Expected last amount 42.50 (most recent transaction), got %.2f", p.LastAmount)
+	}
 }
 
 func TestAnalyzeRecurringTransactions_Empty(t *testing.T) {

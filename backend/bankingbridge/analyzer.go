@@ -14,6 +14,7 @@ type RecurringPattern struct {
 	Description     string  `json:"description"`
 	AverageAmount   float64 `json:"averageAmount"`
 	MedianAmount    float64 `json:"medianAmount"`
+	LastAmount      float64 `json:"lastAmount"`
 	MinAmount       float64 `json:"minAmount"`
 	MaxAmount       float64 `json:"maxAmount"`
 	IsExpense       bool    `json:"isExpense"`
@@ -170,6 +171,20 @@ func analyzeGroup(group *transactionGroup) *RecurringPattern {
 		dominantDay = &day
 	}
 
+	// Find the last (most recent) transaction amount
+	lastAmount := math.Abs(amounts[n-1]) // default to last in slice
+	if len(group.dates) == n {
+		lastIdx := 0
+		lastDate := group.dates[0]
+		for i, d := range group.dates {
+			if d > lastDate {
+				lastDate = d
+				lastIdx = i
+			}
+		}
+		lastAmount = math.Abs(amounts[lastIdx])
+	}
+
 	// Overall confidence
 	confidence := freqConfidence*0.5 + amountConsistency*0.3 + dayConfidence*0.2
 
@@ -184,6 +199,7 @@ func analyzeGroup(group *transactionGroup) *RecurringPattern {
 		Description:     group.description,
 		AverageAmount:   math.Round(avgAmount*100) / 100,
 		MedianAmount:    math.Round(medianAmount*100) / 100,
+		LastAmount:      math.Round(lastAmount*100) / 100,
 		MinAmount:       math.Round(minAmount*100) / 100,
 		MaxAmount:       math.Round(maxAmount*100) / 100,
 		IsExpense:       isExpense,
