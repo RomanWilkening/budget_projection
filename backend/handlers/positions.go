@@ -118,10 +118,16 @@ func validatePosition(p *models.Position) error {
 	}
 
 	switch p.Type {
-	case models.PositionIncome, models.PositionExpense:
+	case models.PositionIncome:
 		if p.AccountID == nil {
-			return errorf("accountId is required for income/expense positions")
+			return errorf("accountId is required for income positions")
 		}
+		// sourceAccountId is optional: if set, the source account is debited
+	case models.PositionExpense:
+		if p.AccountID == nil {
+			return errorf("accountId is required for expense positions")
+		}
+		// targetAccountId is optional: if set, the target account is credited
 	case models.PositionTransfer:
 		if p.SourceAccountID == nil || p.TargetAccountID == nil {
 			return errorf("sourceAccountId and targetAccountId are required for transfer positions")

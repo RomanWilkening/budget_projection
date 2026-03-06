@@ -180,6 +180,12 @@ export default function PositionsPage() {
       payload.targetAccountId = parseInt(form.targetAccountId);
     } else {
       payload.accountId = parseInt(form.accountId);
+      if (form.type === "expense" && form.targetAccountId) {
+        payload.targetAccountId = parseInt(form.targetAccountId);
+      }
+      if (form.type === "income" && form.sourceAccountId) {
+        payload.sourceAccountId = parseInt(form.sourceAccountId);
+      }
     }
 
     if (needsDayOfMonth && form.dayOfMonth) payload.dayOfMonth = parseInt(form.dayOfMonth);
@@ -268,7 +274,11 @@ export default function PositionsPage() {
                   <td>
                     {p.type === "transfer"
                       ? `${accountName(p.sourceAccountId)} → ${accountName(p.targetAccountId)}`
-                      : accountName(p.accountId)}
+                      : p.type === "expense" && p.targetAccountId
+                        ? `${accountName(p.accountId)} → ${accountName(p.targetAccountId)}`
+                        : p.type === "income" && p.sourceAccountId
+                          ? `${accountName(p.sourceAccountId)} → ${accountName(p.accountId)}`
+                          : accountName(p.accountId)}
                   </td>
                   <td>{freqLabel(p.frequencyType)}</td>
                   <td>{new Date(p.startDate).toLocaleDateString("de-DE")}</td>
@@ -363,20 +373,54 @@ export default function PositionsPage() {
                   </div>
                 </div>
               ) : (
-                <div className="form-group">
-                  <label>Konto</label>
-                  <select
-                    value={form.accountId}
-                    onChange={(e) => setField("accountId", e.target.value)}
-                  >
-                    <option value="">— Auswählen —</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <>
+                  <div className="form-group">
+                    <label>Konto</label>
+                    <select
+                      value={form.accountId}
+                      onChange={(e) => setField("accountId", e.target.value)}
+                    >
+                      <option value="">— Auswählen —</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {form.type === "expense" && (
+                    <div className="form-group">
+                      <label>Zielkonto (optional)</label>
+                      <select
+                        value={form.targetAccountId}
+                        onChange={(e) => setField("targetAccountId", e.target.value)}
+                      >
+                        <option value="">— Kein Zielkonto —</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {form.type === "income" && (
+                    <div className="form-group">
+                      <label>Quellkonto (optional)</label>
+                      <select
+                        value={form.sourceAccountId}
+                        onChange={(e) => setField("sourceAccountId", e.target.value)}
+                      >
+                        <option value="">— Kein Quellkonto —</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </>
               )}
 
               <div className="form-row">
