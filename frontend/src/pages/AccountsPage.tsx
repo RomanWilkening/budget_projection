@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import type { Account, Person } from "../types";
+import type { Account, Person, BridgeAccount, BridgeStatus } from "../types";
 import {
   getAccounts,
   createAccount,
@@ -8,6 +8,11 @@ import {
   getPersons,
   addAccountOwner,
   removeAccountOwner,
+  getBankingBridgeStatus,
+  getBankingBridgeAccounts,
+  linkBankingBridgeAccount,
+  syncAccountBalance,
+  syncAllBalances,
 } from "../api";
 
 interface FormState {
@@ -15,19 +20,24 @@ interface FormState {
   balance: string;
   currency: string;
   ownerIds: number[];
+  bankingBridgeAccountId: string;
 }
 
-const emptyForm: FormState = { name: "", balance: "0", currency: "EUR", ownerIds: [] };
+const emptyForm: FormState = { name: "", balance: "0", currency: "EUR", ownerIds: [], bankingBridgeAccountId: "" };
 
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
+  const [bridgeAccounts, setBridgeAccounts] = useState<BridgeAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [formError, setFormError] = useState("");
+  const [syncing, setSyncing] = useState<number | null>(null);
+  const [syncingAll, setSyncingAll] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -40,7 +50,23 @@ export default function AccountsPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  const loadBridgeStatus = () => {
+    getBankingBridgeStatus()
+      .then((s) => {
+        setBridgeStatus(s);
+        if (s.connected) {
+          getBankingBridgeAccounts()
+            .then(setBridgeAccounts)
+            .catch(() => setBridgeAccounts([]));
+        }
+      })
+      .catch(() => setBridgeStatus(null));
+  };
+
+  useEffect(() => {
+    load();
+    loadBridgeStatus();
+  }, []);
 
   const openCreate = () => {
     setEditing(null);
@@ -56,6 +82,7 @@ export default function AccountsPage() {
       balance: String(a.balance),
       currency: a.currency,
       ownerIds: a.owners?.map((o) => o.id) ?? [],
+      bankingBridgeAccountId: a.bankingBridgeAccountId ? String(a.bankingBridgeAccountId) : "",
     });
     setFormError("");
     setShowForm(true);
@@ -94,9 +121,19 @@ export default function AccountsPage() {
           ...toAdd.map((pid) => addAccountOwner(editing.id, pid)),
           ...toRemove.map((pid) => removeAccountOwner(editing.id, pid)),
         ]);
+        // Update Banking Bridge linking
+        const newBridgeId = form.bankingBridgeAccountId ? parseInt(form.bankingBridgeAccountId) : null;
+        const oldBridgeId = editing.bankingBridgeAccountId ?? null;
+        if (newBridgeId !== oldBridgeId) {
+          await linkBankingBridgeAccount(editing.id, newBridgeId);
+        }
       } else {
         const created = await createAccount({ name, balance, currency });
         await Promise.all(form.ownerIds.map((pid) => addAccountOwner(created.id, pid)));
+        // Link to Banking Bridge if selected
+        if (form.bankingBridgeAccountId) {
+          await linkBankingBridgeAccount(created.id, parseInt(form.bankingBridgeAccountId));
+        }
       }
       setShowForm(false);
       load();
@@ -115,6 +152,38 @@ export default function AccountsPage() {
     }
   };
 
+  const handleSyncBalance = async (a: Account) => {
+    setSyncing(a.id);
+    try {
+      await syncAccountBalance(a.id);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sync-Fehler");
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const handleSyncAll = async () => {
+    setSyncingAll(true);
+    try {
+      await syncAllBalances();
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sync-Fehler");
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
+  const getBridgeAccountName = (bridgeId: number | null | undefined) => {
+    if (!bridgeId) return null;
+    const ba = bridgeAccounts.find((b) => b.id === bridgeId);
+    return ba ? `${ba.name} (${ba.bank})` : `#${bridgeId}`;
+  };
+
+  const hasLinkedAccounts = accounts.some((a) => a.bankingBridgeAccountId);
+
   const formatCurrency = (amount: number, currency: string) =>
     amount.toLocaleString("de-DE", { style: "currency", currency });
 
@@ -122,10 +191,33 @@ export default function AccountsPage() {
     <>
       <div className="page-header">
         <h2>Konten</h2>
-        <button className="btn btn-primary" onClick={openCreate}>
-          + Neues Konto
-        </button>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          {hasLinkedAccounts && (
+            <button
+              className="btn btn-secondary"
+              onClick={handleSyncAll}
+              disabled={syncingAll}
+            >
+              {syncingAll ? "⏳ Synchronisiere…" : "🔄 Alle Salden aktualisieren"}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={openCreate}>
+            + Neues Konto
+          </button>
+        </div>
       </div>
+
+      {bridgeStatus && (
+        <div className={`card ${bridgeStatus.connected ? "" : "empty-state"}`} style={{ padding: "0.75rem 1rem", marginBottom: "1rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <span>{bridgeStatus.connected ? "🟢" : bridgeStatus.configured ? "🔴" : "⚪"}</span>
+            <span style={{ fontSize: "0.9rem" }}>
+              Banking Bridge: {bridgeStatus.connected ? "Verbunden" : bridgeStatus.configured ? "Nicht erreichbar" : "Nicht konfiguriert"}
+              {bridgeStatus.connected && bridgeAccounts.length > 0 && ` (${bridgeAccounts.length} Konten verfügbar)`}
+            </span>
+          </div>
+        </div>
+      )}
 
       {error && <div className="error-banner">{error}</div>}
 
@@ -145,7 +237,8 @@ export default function AccountsPage() {
                 <th>Kontostand</th>
                 <th>Währung</th>
                 <th>Inhaber</th>
-                <th style={{ width: 120 }}>Aktionen</th>
+                {bridgeStatus?.connected && <th>Banking Bridge</th>}
+                <th style={{ width: 160 }}>Aktionen</th>
               </tr>
             </thead>
             <tbody>
@@ -167,8 +260,29 @@ export default function AccountsPage() {
                       ))}
                     </div>
                   </td>
+                  {bridgeStatus?.connected && (
+                    <td>
+                      {a.bankingBridgeAccountId ? (
+                        <span className="tag" style={{ background: "#e8f5e9", color: "#2e7d32" }}>
+                          🔗 {getBridgeAccountName(a.bankingBridgeAccountId)}
+                        </span>
+                      ) : (
+                        <span style={{ color: "#999", fontSize: "0.85rem" }}>Nicht verknüpft</span>
+                      )}
+                    </td>
+                  )}
                   <td>
                     <div className="actions-cell">
+                      {a.bankingBridgeAccountId && (
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => handleSyncBalance(a)}
+                          disabled={syncing === a.id}
+                          title="Kontostand aktualisieren"
+                        >
+                          {syncing === a.id ? "⏳" : "🔄"}
+                        </button>
+                      )}
                       <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>
                         ✏️
                       </button>
@@ -237,6 +351,22 @@ export default function AccountsPage() {
                       </label>
                     ))}
                   </div>
+                </div>
+              )}
+              {bridgeStatus?.connected && bridgeAccounts.length > 0 && (
+                <div className="form-group">
+                  <label>Banking Bridge Konto</label>
+                  <select
+                    value={form.bankingBridgeAccountId}
+                    onChange={(e) => setForm({ ...form, bankingBridgeAccountId: e.target.value })}
+                  >
+                    <option value="">— Nicht verknüpft —</option>
+                    {bridgeAccounts.map((ba) => (
+                      <option key={ba.id} value={ba.id}>
+                        {ba.name} ({ba.bank}) – {ba.iban}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
               {formError && <div className="form-error">{formError}</div>}
