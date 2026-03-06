@@ -145,16 +145,16 @@ func TestAnalyzeRecurringTransactions_Empty(t *testing.T) {
 }
 
 func TestDaysBetween(t *testing.T) {
-	// Same month
+	// Same month: Jan 1 to Jan 31 = 30 days
 	d := daysBetween("2024-01-01", "2024-01-31")
 	if d != 30 {
-		t.Errorf("Expected ~30 days, got %d", d)
+		t.Errorf("Expected 30 days, got %d", d)
 	}
 
-	// One month apart
+	// One month apart: Jan 15 to Feb 15 = 31 days (January has 31 days)
 	d = daysBetween("2024-01-15", "2024-02-15")
-	if d != 30 {
-		t.Errorf("Expected ~30 days, got %d", d)
+	if d != 31 {
+		t.Errorf("Expected 31 days, got %d", d)
 	}
 }
 

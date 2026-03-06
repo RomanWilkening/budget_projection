@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 )
 
 // RecurringPattern represents a detected recurring transaction pattern.
@@ -228,8 +229,8 @@ func detectFrequency(dates []string, occurrences int) (string, float64) {
 	freqOptions := []freqMatch{
 		{"weekly", 7, 3},
 		{"biweekly", 14, 4},
-		{"monthly", 30.44, 8},
-		{"quarterly", 91.31, 20},
+		{"monthly", 30.44, 8},    // average month length: 365.25/12
+		{"quarterly", 91.31, 20}, // average quarter length: 365.25/4
 		{"semi_annually", 182.6, 30},
 		{"annually", 365.25, 45},
 	}
@@ -259,41 +260,17 @@ func detectFrequency(dates []string, occurrences int) (string, float64) {
 }
 
 func daysBetween(date1, date2 string) int {
-	if len(date1) < 10 || len(date2) < 10 {
+	t1, err1 := time.Parse("2006-01-02", date1)
+	t2, err2 := time.Parse("2006-01-02", date2)
+	if err1 != nil || err2 != nil {
 		return 0
 	}
-	// Simple day calculation from YYYY-MM-DD
-	y1, m1, d1 := parseDate(date1)
-	y2, m2, d2 := parseDate(date2)
-
-	// Approximate days
-	days1 := y1*365 + m1*30 + d1
-	days2 := y2*365 + m2*30 + d2
-	diff := days2 - days1
-	if diff < 0 {
-		diff = -diff
+	diff := t2.Sub(t1)
+	days := int(diff.Hours() / 24)
+	if days < 0 {
+		days = -days
 	}
-	return diff
-}
-
-func parseDate(s string) (int, int, int) {
-	y, m, d := 0, 0, 0
-	if len(s) >= 4 {
-		for _, c := range s[0:4] {
-			y = y*10 + int(c-'0')
-		}
-	}
-	if len(s) >= 7 {
-		for _, c := range s[5:7] {
-			m = m*10 + int(c-'0')
-		}
-	}
-	if len(s) >= 10 {
-		for _, c := range s[8:10] {
-			d = d*10 + int(c-'0')
-		}
-	}
-	return y, m, d
+	return days
 }
 
 func mostCommonDay(days []int) (int, float64) {

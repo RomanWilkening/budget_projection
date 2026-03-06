@@ -61,12 +61,13 @@ export default function BankingBridgePage() {
     setCreating(key);
     try {
       const today = new Date().toISOString().slice(0, 10);
+      const freqType = pattern.frequency as "daily" | "weekly" | "biweekly" | "monthly" | "quarterly" | "semi_annually" | "annually";
       await createPosition({
         name: pattern.name,
         type: pattern.isExpense ? "expense" : "income",
         amount: pattern.medianAmount,
         accountId: parseInt(selectedAccountId),
-        frequencyType: pattern.frequency as "monthly" | "weekly" | "quarterly" | "annually",
+        frequencyType: freqType,
         interval: 1,
         dayOfMonth: pattern.dayOfMonth ?? undefined,
         businessDayRule: "exact",

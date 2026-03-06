@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/RomanWilkening/budget_projection/backend/bankingbridge"
@@ -231,16 +233,16 @@ func AnalyzeRecurringTransactions(c *gin.Context) {
 
 		// Try to match with existing positions
 		for _, pos := range existingPositions {
-			nameMatch := containsIgnoreCase(pos.Name, pattern.Name) ||
-				containsIgnoreCase(pattern.Name, pos.Name)
+			nameMatch := strings.Contains(strings.ToLower(pos.Name), strings.ToLower(pattern.Name)) ||
+				strings.Contains(strings.ToLower(pattern.Name), strings.ToLower(pos.Name))
 
 			if nameMatch {
 				ap.MatchingPositionID = &pos.ID
 				ap.MatchingPositionName = pos.Name
 
 				// Check if amount differs significantly
-				amountDiff := abs(pos.Amount - pattern.AverageAmount)
-				if amountDiff > pos.Amount*0.1 { // More than 10% difference
+				amountDiff := math.Abs(pos.Amount - pattern.AverageAmount)
+				if amountDiff > math.Abs(pos.Amount)*0.1 { // More than 10% difference
 					ap.SuggestedAction = "update"
 				} else {
 					ap.SuggestedAction = "none"
@@ -260,41 +262,4 @@ func AnalyzeRecurringTransactions(c *gin.Context) {
 		"transactionCount":  len(transactions),
 		"patterns":          annotated,
 	})
-}
-
-func containsIgnoreCase(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 &&
-		contains(toLower(s), toLower(substr))
-}
-
-func contains(s, substr string) bool {
-	if len(substr) > len(s) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func toLower(s string) string {
-	b := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + 32
-		} else {
-			b[i] = c
-		}
-	}
-	return string(b)
-}
-
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
