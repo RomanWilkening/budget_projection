@@ -362,6 +362,60 @@ func TestPositionCRUD(t *testing.T) {
 	}
 }
 
+func TestPositionDateOnlyFormat(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Set up person and account
+	body, _ := json.Marshal(map[string]string{"name": "Dave"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/persons", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	accountData := map[string]interface{}{
+		"name":     "Sparkonto",
+		"balance":  0,
+		"currency": "EUR",
+		"ownerIds": []uint{1},
+	}
+	body, _ = json.Marshal(accountData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	// Create position with date-only startDate (as sent by the frontend <input type="date">)
+	positionData := map[string]interface{}{
+		"name":            "Miete",
+		"type":            "expense",
+		"amount":          800.00,
+		"accountId":       uint(1),
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"businessDayRule": "exact",
+		"startDate":       "2026-03-06",
+	}
+	body, _ = json.Marshal(positionData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201 for date-only startDate, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var position models.Position
+	json.Unmarshal(w.Body.Bytes(), &position)
+	if position.Name != "Miete" {
+		t.Fatalf("Expected name 'Miete', got '%s'", position.Name)
+	}
+	if position.StartDate.IsZero() {
+		t.Fatal("Expected non-zero StartDate")
+	}
+}
+
 func TestPositionValidation(t *testing.T) {
 	setupTestDB(t)
 	router := setupRouter()
