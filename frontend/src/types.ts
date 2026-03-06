@@ -101,6 +101,7 @@ export interface RecurringPattern {
   description: string;
   averageAmount: number;
   medianAmount: number;
+  lastAmount: number;
   minAmount: number;
   maxAmount: number;
   isExpense: boolean;
