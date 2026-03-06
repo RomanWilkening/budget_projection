@@ -180,6 +180,12 @@ export default function PositionsPage() {
       payload.targetAccountId = parseInt(form.targetAccountId);
     } else {
       payload.accountId = parseInt(form.accountId);
+      if (form.type === "expense" && form.targetAccountId) {
+        payload.targetAccountId = parseInt(form.targetAccountId);
+      }
+      if (form.type === "income" && form.sourceAccountId) {
+        payload.sourceAccountId = parseInt(form.sourceAccountId);
+      }
     }
 
     if (needsDayOfMonth && form.dayOfMonth) payload.dayOfMonth = parseInt(form.dayOfMonth);
@@ -217,6 +223,19 @@ export default function PositionsPage() {
 
   const freqLabel = (ft: string) =>
     FREQUENCY_TYPES.find((f) => f.value === ft)?.label ?? ft;
+
+  const formatAccountDisplay = (p: Position) => {
+    if (p.type === "transfer") {
+      return `${accountName(p.sourceAccountId)} → ${accountName(p.targetAccountId)}`;
+    }
+    if (p.type === "expense" && p.targetAccountId) {
+      return `${accountName(p.accountId)} → ${accountName(p.targetAccountId)}`;
+    }
+    if (p.type === "income" && p.sourceAccountId) {
+      return `${accountName(p.sourceAccountId)} → ${accountName(p.accountId)}`;
+    }
+    return accountName(p.accountId);
+  };
 
   const accountName = (id?: number) => {
     if (!id) return "–";
@@ -265,11 +284,7 @@ export default function PositionsPage() {
                       {p.amount.toLocaleString("de-DE", { minimumFractionDigits: 2 })} €
                     </span>
                   </td>
-                  <td>
-                    {p.type === "transfer"
-                      ? `${accountName(p.sourceAccountId)} → ${accountName(p.targetAccountId)}`
-                      : accountName(p.accountId)}
-                  </td>
+                  <td>{formatAccountDisplay(p)}</td>
                   <td>{freqLabel(p.frequencyType)}</td>
                   <td>{new Date(p.startDate).toLocaleDateString("de-DE")}</td>
                   <td>
@@ -363,20 +378,54 @@ export default function PositionsPage() {
                   </div>
                 </div>
               ) : (
-                <div className="form-group">
-                  <label>Konto</label>
-                  <select
-                    value={form.accountId}
-                    onChange={(e) => setField("accountId", e.target.value)}
-                  >
-                    <option value="">— Auswählen —</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <>
+                  <div className="form-group">
+                    <label>Konto</label>
+                    <select
+                      value={form.accountId}
+                      onChange={(e) => setField("accountId", e.target.value)}
+                    >
+                      <option value="">— Auswählen —</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {form.type === "expense" && (
+                    <div className="form-group">
+                      <label>Zielkonto (optional)</label>
+                      <select
+                        value={form.targetAccountId}
+                        onChange={(e) => setField("targetAccountId", e.target.value)}
+                      >
+                        <option value="">— Kein Zielkonto —</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {form.type === "income" && (
+                    <div className="form-group">
+                      <label>Quellkonto (optional)</label>
+                      <select
+                        value={form.sourceAccountId}
+                        onChange={(e) => setField("sourceAccountId", e.target.value)}
+                      >
+                        <option value="">— Kein Quellkonto —</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </>
               )}
 
               <div className="form-row">

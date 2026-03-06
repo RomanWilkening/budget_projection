@@ -683,3 +683,211 @@ func TestSettingsCRUD(t *testing.T) {
 		t.Fatalf("Expected updated URL, got '%s'", settings["banking_bridge_url"])
 	}
 }
+
+func TestExpenseWithTargetAccount(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create person
+	body, _ := json.Marshal(map[string]string{"name": "Frank"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/persons", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", w.Code)
+	}
+
+	// Create two accounts: Private (1000) and Household (500)
+	for _, acc := range []map[string]interface{}{
+		{"name": "Privatkonto", "balance": 1000.0, "currency": "EUR", "ownerIds": []uint{1}},
+		{"name": "Haushaltskonto", "balance": 500.0, "currency": "EUR", "ownerIds": []uint{1}},
+	} {
+		body, _ = json.Marshal(acc)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Create expense from Privatkonto (accountId=1) with target Haushaltskonto (targetAccountId=2)
+	privateID := uint(1)
+	householdID := uint(2)
+	dayOfMonth := 15
+	posData := map[string]interface{}{
+		"name":            "Haushaltsgeld",
+		"type":            "expense",
+		"amount":          200.00,
+		"accountId":       privateID,
+		"targetAccountId": householdID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      dayOfMonth,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify the position was created with targetAccountId
+	var position models.Position
+	json.Unmarshal(w.Body.Bytes(), &position)
+	if position.TargetAccountID == nil || *position.TargetAccountID != householdID {
+		t.Fatalf("Expected targetAccountId %d, got %v", householdID, position.TargetAccountID)
+	}
+
+	// Get projection for 2 months
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/projection?months=2&startDate=2026-01-01&granularity=monthly", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result struct {
+		Accounts []struct {
+			ID         uint   `json:"id"`
+			Name       string `json:"name"`
+			DataPoints []struct {
+				Date    string  `json:"date"`
+				Balance float64 `json:"balance"`
+			} `json:"dataPoints"`
+		} `json:"accounts"`
+		Totals []struct {
+			Date    string  `json:"date"`
+			Balance float64 `json:"balance"`
+		} `json:"totals"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+
+	if len(result.Accounts) != 2 {
+		t.Fatalf("Expected 2 accounts, got %d", len(result.Accounts))
+	}
+
+	// On 2026-01-15: Privatkonto 1000-200=800, Haushaltskonto 500+200=700
+	// On 2026-02-15: Privatkonto 800-200=600, Haushaltskonto 700+200=900
+	// At 2026-02-01 (monthly granularity): only first occurrence applied
+	// Privatkonto: 800, Haushaltskonto: 700
+	privateAcc := result.Accounts[0]
+	householdAcc := result.Accounts[1]
+
+	// After first month (first occurrence on Jan 15)
+	if privateAcc.DataPoints[1].Balance != 800.0 {
+		t.Fatalf("Expected Privatkonto balance 800.00 after first month, got %.2f", privateAcc.DataPoints[1].Balance)
+	}
+	if householdAcc.DataPoints[1].Balance != 700.0 {
+		t.Fatalf("Expected Haushaltskonto balance 700.00 after first month, got %.2f", householdAcc.DataPoints[1].Balance)
+	}
+
+	// Total should remain constant (no money is created or destroyed)
+	if result.Totals[0].Balance != 1500.0 {
+		t.Fatalf("Expected total balance 1500.00, got %.2f", result.Totals[0].Balance)
+	}
+	if result.Totals[1].Balance != 1500.0 {
+		t.Fatalf("Expected total balance 1500.00 after first month, got %.2f", result.Totals[1].Balance)
+	}
+}
+
+func TestIncomeWithSourceAccount(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create person
+	body, _ := json.Marshal(map[string]string{"name": "Grace"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/persons", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", w.Code)
+	}
+
+	// Create two accounts: Savings (2000) and Checking (500)
+	for _, acc := range []map[string]interface{}{
+		{"name": "Sparkonto", "balance": 2000.0, "currency": "EUR", "ownerIds": []uint{1}},
+		{"name": "Girokonto", "balance": 500.0, "currency": "EUR", "ownerIds": []uint{1}},
+	} {
+		body, _ = json.Marshal(acc)
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Create income to Girokonto (accountId=2) from Sparkonto (sourceAccountId=1)
+	savingsID := uint(1)
+	checkingID := uint(2)
+	dayOfMonth := 1
+	posData := map[string]interface{}{
+		"name":            "Sparkonto Entnahme",
+		"type":            "income",
+		"amount":          300.00,
+		"accountId":       checkingID,
+		"sourceAccountId": savingsID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      dayOfMonth,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Get projection
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/projection?months=2&startDate=2026-01-01&granularity=monthly", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result struct {
+		Accounts []struct {
+			ID         uint   `json:"id"`
+			Name       string `json:"name"`
+			DataPoints []struct {
+				Date    string  `json:"date"`
+				Balance float64 `json:"balance"`
+			} `json:"dataPoints"`
+		} `json:"accounts"`
+		Totals []struct {
+			Date    string  `json:"date"`
+			Balance float64 `json:"balance"`
+		} `json:"totals"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+
+	// On 2026-01-01: Sparkonto 2000-300=1700, Girokonto 500+300=800
+	savingsAcc := result.Accounts[0]
+	checkingAcc := result.Accounts[1]
+
+	if savingsAcc.DataPoints[0].Balance != 1700.0 {
+		t.Fatalf("Expected Sparkonto balance 1700.00, got %.2f", savingsAcc.DataPoints[0].Balance)
+	}
+	if checkingAcc.DataPoints[0].Balance != 800.0 {
+		t.Fatalf("Expected Girokonto balance 800.00, got %.2f", checkingAcc.DataPoints[0].Balance)
+	}
+
+	// Total should remain constant
+	if result.Totals[0].Balance != 2500.0 {
+		t.Fatalf("Expected total balance 2500.00, got %.2f", result.Totals[0].Balance)
+	}
+}

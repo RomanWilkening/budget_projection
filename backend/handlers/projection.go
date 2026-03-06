@@ -114,12 +114,28 @@ func GetProjection(c *gin.Context) {
 						amount:    pos.Amount,
 					})
 				}
+				// Optional: debit source account
+				if pos.SourceAccountID != nil {
+					events = append(events, balanceEvent{
+						date:      date,
+						accountID: *pos.SourceAccountID,
+						amount:    -pos.Amount,
+					})
+				}
 			case models.PositionExpense:
 				if pos.AccountID != nil {
 					events = append(events, balanceEvent{
 						date:      date,
 						accountID: *pos.AccountID,
 						amount:    -pos.Amount,
+					})
+				}
+				// Optional: credit target account
+				if pos.TargetAccountID != nil {
+					events = append(events, balanceEvent{
+						date:      date,
+						accountID: *pos.TargetAccountID,
+						amount:    pos.Amount,
 					})
 				}
 			case models.PositionTransfer:
