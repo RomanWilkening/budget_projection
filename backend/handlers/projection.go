@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"math"
 	"net/http"
 	"sort"
 	"time"
@@ -411,7 +412,7 @@ func generateTimeSeriesDates(start, end time.Time, granularity string) []time.Ti
 }
 
 func roundToTwoDecimals(v float64) float64 {
-	return float64(int64(v*100+0.5)) / 100
+	return math.Round(v*100) / 100
 }
 
 func parsePositiveInt(s string) (int, error) {

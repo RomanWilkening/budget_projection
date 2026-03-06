@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -51,7 +51,7 @@ export default function ProjectionPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
   useEffect(() => {
     let cancelled = false;
