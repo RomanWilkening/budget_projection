@@ -16,6 +16,7 @@ func ListPositions(c *gin.Context) {
 		Preload("Account").
 		Preload("SourceAccount").
 		Preload("TargetAccount").
+		Order("sort_order ASC, id ASC").
 		Find(&positions).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -50,6 +51,17 @@ func CreatePosition(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Set sort order to the max + 1 so it appears at the end
+	var maxOrder int
+	database.DB.Raw(`
+		SELECT COALESCE(MAX(sort_order), -1) FROM (
+			SELECT sort_order FROM positions WHERE deleted_at IS NULL
+			UNION ALL
+			SELECT sort_order FROM position_separators WHERE deleted_at IS NULL
+		)
+	`).Scan(&maxOrder)
+	position.SortOrder = maxOrder + 1
 
 	if err := database.DB.Create(&position).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -150,6 +162,46 @@ func validatePosition(p *models.Position) error {
 	}
 
 	return nil
+}
+
+// ReorderItem represents a single item in the reorder request.
+type ReorderItem struct {
+	Type string `json:"type"` // "position" or "separator"
+	ID   uint   `json:"id"`
+}
+
+// ReorderPositions updates the sort order of positions and separators.
+func ReorderPositions(c *gin.Context) {
+	var items []ReorderItem
+	if err := c.ShouldBindJSON(&items); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tx := database.DB.Begin()
+	for i, item := range items {
+		switch item.Type {
+		case "position":
+			if err := tx.Model(&models.Position{}).Where("id = ?", item.ID).Update("sort_order", i).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		case "separator":
+			if err := tx.Model(&models.PositionSeparator{}).Where("id = ?", item.ID).Update("sort_order", i).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		default:
+			tx.Rollback()
+			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid type: %s", item.Type)})
+			return
+		}
+	}
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{"message": "Order updated"})
 }
 
 type validationError struct {

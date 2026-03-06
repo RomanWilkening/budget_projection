@@ -156,7 +156,19 @@ type Position struct {
 	StartDate       FlexDate        `json:"startDate" gorm:"not null"`
 	EndDate         *FlexDate       `json:"endDate"`                         // nil = indefinite
 
+	SortOrder       int             `json:"sortOrder" gorm:"default:0"`      // user-defined display order
+
 	CreatedAt       time.Time       `json:"createdAt"`
 	UpdatedAt       time.Time       `json:"updatedAt"`
 	DeletedAt       gorm.DeletedAt  `json:"-" gorm:"index"`
+}
+
+// PositionSeparator represents a user-defined visual separator between position groups.
+type PositionSeparator struct {
+	ID        uint           `json:"id" gorm:"primaryKey"`
+	Name      string         `json:"name" gorm:"not null"`
+	SortOrder int            `json:"sortOrder" gorm:"default:0"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
+	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 }

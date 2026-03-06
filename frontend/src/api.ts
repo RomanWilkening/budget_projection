@@ -1,4 +1,4 @@
-import type { Person, Account, Position, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings } from "./types";
+import type { Person, Account, Position, PositionSeparator, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings } from "./types";
 
 const BASE = "/api";
 
@@ -51,6 +51,17 @@ export const updatePosition = (id: number, data: Partial<Position>) =>
   request<Position>(`${BASE}/positions/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deletePosition = (id: number) =>
   request<void>(`${BASE}/positions/${id}`, { method: "DELETE" });
+export const reorderPositions = (items: { type: string; id: number }[]) =>
+  request<void>(`${BASE}/positions`, { method: "PUT", body: JSON.stringify(items) });
+
+// Position Separators
+export const getSeparators = () => request<PositionSeparator[]>(`${BASE}/position-separators`);
+export const createSeparator = (data: { name: string }) =>
+  request<PositionSeparator>(`${BASE}/position-separators`, { method: "POST", body: JSON.stringify(data) });
+export const updateSeparator = (id: number, data: { name: string }) =>
+  request<PositionSeparator>(`${BASE}/position-separators/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteSeparator = (id: number) =>
+  request<void>(`${BASE}/position-separators/${id}`, { method: "DELETE" });
 
 // Projection
 export const getProjection = (params: {

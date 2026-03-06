@@ -53,6 +53,15 @@ export interface Position {
   businessDayRule: BusinessDayRule;
   startDate: string;
   endDate?: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PositionSeparator {
+  id: number;
+  name: string;
+  sortOrder: number;
   createdAt: string;
   updatedAt: string;
 }

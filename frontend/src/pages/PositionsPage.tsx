@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
-import type { Position, Account, PositionType, FrequencyType, BusinessDayRule } from "../types";
-import { getPositions, createPosition, updatePosition, deletePosition, getAccounts } from "../api";
+import { useEffect, useState, useRef, type FormEvent } from "react";
+import type { Position, Account, PositionType, FrequencyType, BusinessDayRule, PositionSeparator } from "../types";
+import { getPositions, createPosition, updatePosition, deletePosition, getAccounts, getSeparators, createSeparator, updateSeparator, deleteSeparator, reorderPositions } from "../api";
 
 const POSITION_TYPES: { value: PositionType; label: string }[] = [
   { value: "income", label: "Einnahme" },
@@ -74,8 +74,14 @@ const emptyForm: FormState = {
   endDate: "",
 };
 
+// Unified list item: either a position or a separator
+type ListItem =
+  | { kind: "position"; data: Position }
+  | { kind: "separator"; data: PositionSeparator };
+
 export default function PositionsPage() {
   const [positions, setPositions] = useState<Position[]>([]);
+  const [separators, setSeparators] = useState<PositionSeparator[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -83,19 +89,115 @@ export default function PositionsPage() {
   const [editing, setEditing] = useState<Position | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [formError, setFormError] = useState("");
+  const [separatorName, setSeparatorName] = useState("");
+  const [editingSeparator, setEditingSeparator] = useState<PositionSeparator | null>(null);
+  const [editingSeparatorName, setEditingSeparatorName] = useState("");
+
+  // Drag & drop state
+  const [dragItem, setDragItem] = useState<{ kind: string; id: number } | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragCounter = useRef(0);
 
   const load = () => {
     setLoading(true);
-    Promise.all([getPositions(), getAccounts()])
-      .then(([p, a]) => {
+    Promise.all([getPositions(), getAccounts(), getSeparators()])
+      .then(([p, a, s]) => {
         setPositions(p);
         setAccounts(a);
+        setSeparators(s);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
+
+  // Build merged & sorted list
+  const items: ListItem[] = [
+    ...positions.map((p): ListItem => ({ kind: "position", data: p })),
+    ...separators.map((s): ListItem => ({ kind: "separator", data: s })),
+  ].sort((a, b) => a.data.sortOrder - b.data.sortOrder);
+
+  // Drag & drop handlers
+  const handleDragStart = (e: React.DragEvent, kind: string, id: number) => {
+    setDragItem({ kind, id });
+    e.dataTransfer.effectAllowed = "move";
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add("dragging");
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    const target = e.currentTarget as HTMLElement;
+    target.classList.remove("dragging");
+    setDragItem(null);
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+  };
+
+  const handleDragEnter = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    dragCounter.current++;
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    dragCounter.current--;
+    if (dragCounter.current <= 0) {
+      setDragOverIndex(null);
+      dragCounter.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+
+    if (!dragItem) return;
+
+    const dragIndex = items.findIndex(
+      (item) =>
+        (item.kind === "position" && dragItem.kind === "position" && item.data.id === dragItem.id) ||
+        (item.kind === "separator" && dragItem.kind === "separator" && item.data.id === dragItem.id)
+    );
+
+    if (dragIndex === dropIndex || dragIndex === -1) return;
+
+    const newItems = [...items];
+    const [moved] = newItems.splice(dragIndex, 1);
+    newItems.splice(dropIndex, 0, moved);
+
+    // Optimistic update
+    const reorderedPositions: Position[] = [];
+    const reorderedSeparators: PositionSeparator[] = [];
+    const reorderPayload: { type: string; id: number }[] = [];
+
+    newItems.forEach((item, i) => {
+      if (item.kind === "position") {
+        reorderedPositions.push({ ...item.data as Position, sortOrder: i });
+        reorderPayload.push({ type: "position", id: item.data.id });
+      } else {
+        reorderedSeparators.push({ ...item.data as PositionSeparator, sortOrder: i });
+        reorderPayload.push({ type: "separator", id: item.data.id });
+      }
+    });
+
+    setPositions(reorderedPositions);
+    setSeparators(reorderedSeparators);
+    setDragItem(null);
+
+    try {
+      await reorderPositions(reorderPayload);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Sortieren");
+      load();
+    }
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -216,6 +318,41 @@ export default function PositionsPage() {
     }
   };
 
+  const handleCreateSeparator = async () => {
+    const name = separatorName.trim();
+    if (!name) return;
+    try {
+      await createSeparator({ name });
+      setSeparatorName("");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler");
+    }
+  };
+
+  const handleUpdateSeparator = async (sep: PositionSeparator) => {
+    const name = editingSeparatorName.trim();
+    if (!name) return;
+    try {
+      await updateSeparator(sep.id, { name });
+      setEditingSeparator(null);
+      setEditingSeparatorName("");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler");
+    }
+  };
+
+  const handleDeleteSeparator = async (sep: PositionSeparator) => {
+    if (!confirm(`Trenner "${sep.name}" wirklich löschen?`)) return;
+    try {
+      await deleteSeparator(sep.id);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler");
+    }
+  };
+
   const typeBadge = (type: PositionType) => {
     const labels: Record<PositionType, string> = { income: "Einnahme", expense: "Ausgabe", transfer: "Umbuchung" };
     return <span className={`badge badge-${type}`}>{labels[type]}</span>;
@@ -246,16 +383,32 @@ export default function PositionsPage() {
     <>
       <div className="page-header">
         <h2>Positionen</h2>
-        <button className="btn btn-primary" onClick={openCreate}>
-          + Neue Position
-        </button>
+        <div className="page-header-actions">
+          <div className="separator-add-inline">
+            <input
+              type="text"
+              value={separatorName}
+              onChange={(e) => setSeparatorName(e.target.value)}
+              placeholder="Trenner-Name"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateSeparator();
+              }}
+            />
+            <button className="btn btn-secondary" onClick={handleCreateSeparator} disabled={!separatorName.trim()}>
+              + Trenner
+            </button>
+          </div>
+          <button className="btn btn-primary" onClick={openCreate}>
+            + Neue Position
+          </button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
       {loading ? (
         <div className="loading">Laden…</div>
-      ) : positions.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="card empty-state">
           <div className="empty-icon">📋</div>
           <p>Noch keine Positionen vorhanden.</p>
@@ -265,6 +418,7 @@ export default function PositionsPage() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 40 }}></th>
                 <th>Name</th>
                 <th>Typ</th>
                 <th>Betrag</th>
@@ -275,30 +429,100 @@ export default function PositionsPage() {
               </tr>
             </thead>
             <tbody>
-              {positions.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.name}</td>
-                  <td>{typeBadge(p.type)}</td>
-                  <td>
-                    <span className="amount">
-                      {p.amount.toLocaleString("de-DE", { minimumFractionDigits: 2 })} €
-                    </span>
-                  </td>
-                  <td>{formatAccountDisplay(p)}</td>
-                  <td>{freqLabel(p.frequencyType)}</td>
-                  <td>{new Date(p.startDate).toLocaleDateString("de-DE")}</td>
-                  <td>
-                    <div className="actions-cell">
-                      <button className="btn btn-sm btn-secondary" onClick={() => openEdit(p)}>
-                        ✏️
-                      </button>
-                      <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p)}>
-                        🗑️
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {items.map((item, index) => {
+                if (item.kind === "separator") {
+                  const sep = item.data as PositionSeparator;
+                  return (
+                    <tr
+                      key={`sep-${sep.id}`}
+                      className={`separator-row${dragOverIndex === index ? " drag-over" : ""}`}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, "separator", sep.id)}
+                      onDragEnd={handleDragEnd}
+                      onDragEnter={(e) => handleDragEnter(e, index)}
+                      onDragLeave={handleDragLeave}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, index)}
+                    >
+                      <td className="drag-handle">⠿</td>
+                      <td colSpan={5} className="separator-cell">
+                        {editingSeparator?.id === sep.id ? (
+                          <span className="separator-edit-inline">
+                            <input
+                              type="text"
+                              value={editingSeparatorName}
+                              onChange={(e) => setEditingSeparatorName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleUpdateSeparator(sep);
+                                if (e.key === "Escape") setEditingSeparator(null);
+                              }}
+                              autoFocus
+                            />
+                            <button className="btn btn-sm btn-primary" onClick={() => handleUpdateSeparator(sep)}>
+                              ✓
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="separator-label">{sep.name}</span>
+                        )}
+                      </td>
+                      <td colSpan={2}>
+                        <div className="actions-cell">
+                          <button
+                            className="btn btn-sm btn-secondary"
+                            onClick={() => {
+                              setEditingSeparator(sep);
+                              setEditingSeparatorName(sep.name);
+                            }}
+                          >
+                            ✏️
+                          </button>
+                          <button className="btn btn-sm btn-danger" onClick={() => handleDeleteSeparator(sep)}>
+                            🗑️
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                const p = item.data as Position;
+                return (
+                  <tr
+                    key={`pos-${p.id}`}
+                    className={dragOverIndex === index ? "drag-over" : ""}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, "position", p.id)}
+                    onDragEnd={handleDragEnd}
+                    onDragEnter={(e) => handleDragEnter(e, index)}
+                    onDragLeave={handleDragLeave}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, index)}
+                  >
+                    <td className="drag-handle">⠿</td>
+                    <td>{p.name}</td>
+                    <td>{typeBadge(p.type)}</td>
+                    <td>
+                      <span className="amount">
+                        {p.amount.toLocaleString("de-DE", { minimumFractionDigits: 2 })} €
+                      </span>
+                    </td>
+                    <td>{formatAccountDisplay(p)}</td>
+                    <td>{freqLabel(p.frequencyType)}</td>
+                    <td>{new Date(p.startDate).toLocaleDateString("de-DE")}</td>
+                    <td>
+                      <div className="actions-cell">
+                        <button className="btn btn-sm btn-secondary" onClick={() => openEdit(p)}>
+                          ✏️
+                        </button>
+                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(p)}>
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

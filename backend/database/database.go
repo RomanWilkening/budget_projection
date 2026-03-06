@@ -44,6 +44,7 @@ func Init() {
 		&models.Person{},
 		&models.Account{},
 		&models.Position{},
+		&models.PositionSeparator{},
 	); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
