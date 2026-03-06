@@ -66,6 +66,9 @@ func setupRouter() *gin.Engine {
 			positions.PUT("/:id", handlers.UpdatePosition)
 			positions.DELETE("/:id", handlers.DeletePosition)
 		}
+
+		// Projection
+		api.GET("/projection", handlers.GetProjection)
 	}
 
 	// Serve frontend static files
