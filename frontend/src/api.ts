@@ -1,4 +1,4 @@
-import type { Person, Account, Position, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis } from "./types";
+import type { Person, Account, Position, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings } from "./types";
 
 const BASE = "/api";
 
@@ -89,3 +89,9 @@ export const analyzeRecurringTransactions = (accountId: number, months?: number)
   const query = months ? `?months=${months}` : "";
   return request<RecurringAnalysis>(`${BASE}/accounts/${accountId}/recurring-transactions${query}`);
 };
+
+// Settings
+export const getSettings = () =>
+  request<Settings>(`${BASE}/settings`);
+export const updateSettings = (data: Settings) =>
+  request<Settings>(`${BASE}/settings`, { method: "PUT", body: JSON.stringify(data) });

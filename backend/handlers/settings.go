@@ -8,17 +8,30 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetSettings returns all application settings as a key-value map.
-func GetSettings(c *gin.Context) {
+// allowedSettings is the whitelist of setting keys that can be stored.
+var allowedSettings = map[string]bool{
+	"banking_bridge_url": true,
+}
+
+// loadSettingsMap returns all settings from the database as a key-value map.
+func loadSettingsMap() (map[string]string, error) {
 	var settings []models.Setting
 	if err := database.DB.Find(&settings).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return nil, err
 	}
-
 	result := make(map[string]string)
 	for _, s := range settings {
 		result[s.Key] = s.Value
+	}
+	return result, nil
+}
+
+// GetSettings returns all application settings as a key-value map.
+func GetSettings(c *gin.Context) {
+	result, err := loadSettingsMap()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 	c.JSON(http.StatusOK, result)
 }
@@ -29,6 +42,14 @@ func UpdateSettings(c *gin.Context) {
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Validate keys against whitelist
+	for key := range input {
+		if !allowedSettings[key] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Unknown setting: " + key})
+			return
+		}
 	}
 
 	for key, value := range input {
@@ -44,16 +65,10 @@ func UpdateSettings(c *gin.Context) {
 		bridgeClient.SetBaseURL(url)
 	}
 
-	// Return all settings
-	var settings []models.Setting
-	if err := database.DB.Find(&settings).Error; err != nil {
+	result, err := loadSettingsMap()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	result := make(map[string]string)
-	for _, s := range settings {
-		result[s.Key] = s.Value
 	}
 	c.JSON(http.StatusOK, result)
 }

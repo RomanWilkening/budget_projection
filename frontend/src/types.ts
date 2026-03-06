@@ -122,3 +122,5 @@ export interface RecurringAnalysis {
   transactionCount: number;
   patterns: RecurringPattern[];
 }
+
+export type Settings = Record<string, string>;
