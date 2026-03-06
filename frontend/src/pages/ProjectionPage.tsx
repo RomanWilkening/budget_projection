@@ -10,8 +10,8 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import { getProjection } from "../api";
-import type { ProjectionResponse } from "../types";
+import { getProjection, getPersons, getAccounts } from "../api";
+import type { ProjectionResponse, Person, Account } from "../types";
 
 const COLORS = [
   "#3182ce",
@@ -50,11 +50,28 @@ export default function ProjectionPage() {
   const [data, setData] = useState<ProjectionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [persons, setPersons] = useState<Person[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set());
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
+  // Fetch persons and accounts once on mount
+  useEffect(() => {
+    Promise.all([getPersons(), getAccounts()])
+      .then(([p, a]) => {
+        setPersons(p);
+        setAccounts(a);
+        setSelectedPersonIds(new Set(p.map((pr) => pr.id)));
+        setSelectedAccountIds(new Set(a.map((ac) => ac.id)));
+      })
+      .catch(() => { /* filter panel will simply not render */ });
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
     getProjection({ months, startDate: today })
       .then((result) => {
         if (!cancelled) setData(result);
@@ -68,38 +85,88 @@ export default function ProjectionPage() {
     return () => { cancelled = true; };
   }, [months, today]);
 
-  // Build chart data: merge all accounts into rows keyed by date
+  // Build a map of account ID -> owner person IDs using the accounts data
+  const accountOwnerMap = useMemo(() => {
+    const m = new Map<number, number[]>();
+    for (const acc of accounts) {
+      m.set(acc.id, (acc.owners ?? []).map((o) => o.id));
+    }
+    return m;
+  }, [accounts]);
+
+  // Determine which account IDs are visible based on person + account filter
+  const visibleAccountIds = useMemo(() => {
+    if (!data) return new Set<number>();
+    return new Set(
+      data.accounts
+        .filter((acc) => {
+          if (!selectedAccountIds.has(acc.id)) return false;
+          const ownerIds = accountOwnerMap.get(acc.id) ?? [];
+          // Account with no owners passes person filter
+          if (ownerIds.length === 0) return true;
+          // At least one owner must be selected
+          return ownerIds.some((oid) => selectedPersonIds.has(oid));
+        })
+        .map((acc) => acc.id)
+    );
+  }, [data, selectedAccountIds, selectedPersonIds, accountOwnerMap]);
+
+  const togglePerson = (id: number) => {
+    setSelectedPersonIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAccount = (id: number) => {
+    setSelectedAccountIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Filtered accounts from projection data
+  const filteredAccounts = data
+    ? data.accounts.filter((acc) => visibleAccountIds.has(acc.id))
+    : [];
+
+  // Build chart data: merge visible accounts into rows keyed by date
   const chartData = data
     ? data.totals.map((t, i) => {
         const row: Record<string, string | number> = {
           date: t.date,
           dateLabel: formatDateLabel(t.date),
-          Gesamt: t.balance,
         };
-        for (const acc of data.accounts) {
-          row[acc.name] = acc.dataPoints[i]?.balance ?? 0;
+        let total = 0;
+        for (const acc of filteredAccounts) {
+          const bal = acc.dataPoints[i]?.balance ?? 0;
+          row[acc.name] = bal;
+          total += bal;
         }
+        row["Gesamt"] = total;
         return row;
       })
     : [];
 
-  // Compute summary statistics
-  const summaryStats = data
-    ? data.accounts.map((acc) => {
-        const balances = acc.dataPoints.map((dp) => dp.balance);
-        const startBal = balances[0] ?? 0;
-        const endBal = balances[balances.length - 1] ?? 0;
-        return {
-          name: acc.name,
-          currency: acc.currency,
-          startBalance: startBal,
-          endBalance: endBal,
-          change: endBal - startBal,
-          min: Math.min(...balances),
-          max: Math.max(...balances),
-        };
-      })
-    : [];
+  // Compute summary statistics for visible accounts only
+  const summaryStats = filteredAccounts.map((acc) => {
+    const balances = acc.dataPoints.map((dp) => dp.balance);
+    const startBal = balances[0] ?? 0;
+    const endBal = balances[balances.length - 1] ?? 0;
+    return {
+      name: acc.name,
+      currency: acc.currency,
+      startBalance: startBal,
+      endBalance: endBal,
+      change: endBal - startBal,
+      min: balances.length > 0 ? Math.min(...balances) : 0,
+      max: balances.length > 0 ? Math.max(...balances) : 0,
+    };
+  });
 
   const totalStart = summaryStats.reduce((s, a) => s + a.startBalance, 0);
   const totalEnd = summaryStats.reduce((s, a) => s + a.endBalance, 0);
@@ -130,6 +197,49 @@ export default function ProjectionPage() {
 
       {!loading && data && (
         <>
+          {/* Filter Panel */}
+          {(persons.length > 0 || accounts.length > 0) && (
+            <div className="card projection-filter-card">
+              <h3>Filter</h3>
+              <div className="projection-filter-groups">
+                {persons.length > 0 && (
+                  <div className="projection-filter-group">
+                    <span className="projection-filter-label">Personen</span>
+                    <div className="projection-filter-options">
+                      {persons.map((p) => (
+                        <label key={p.id} className="projection-filter-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedPersonIds.has(p.id)}
+                            onChange={() => togglePerson(p.id)}
+                          />
+                          {p.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {accounts.length > 0 && (
+                  <div className="projection-filter-group">
+                    <span className="projection-filter-label">Konten</span>
+                    <div className="projection-filter-options">
+                      {accounts.map((a) => (
+                        <label key={a.id} className="projection-filter-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedAccountIds.has(a.id)}
+                            onChange={() => toggleAccount(a.id)}
+                          />
+                          {a.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Summary Cards */}
           <div className="dashboard-grid">
             <div className="card stat-card">
@@ -152,7 +262,7 @@ export default function ProjectionPage() {
             </div>
             <div className="card stat-card">
               <div className="stat-icon">🏦</div>
-              <div className="stat-value">{data.accounts.length}</div>
+              <div className="stat-value">{filteredAccounts.length}</div>
               <div className="stat-label">Konten</div>
             </div>
           </div>
@@ -180,7 +290,7 @@ export default function ProjectionPage() {
                   />
                   <Legend />
                   <ReferenceLine y={0} stroke="#e53e3e" strokeDasharray="3 3" />
-                  {data.accounts.map((acc, i) => (
+                  {filteredAccounts.map((acc, i) => (
                     <Line
                       key={acc.id}
                       type="monotone"
@@ -191,7 +301,7 @@ export default function ProjectionPage() {
                       activeDot={{ r: 4 }}
                     />
                   ))}
-                  {data.accounts.length > 1 && (
+                  {filteredAccounts.length > 1 && (
                     <Line
                       type="monotone"
                       dataKey="Gesamt"

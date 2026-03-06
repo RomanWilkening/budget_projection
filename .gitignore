@@ -1,6 +1,7 @@
 # Backend
 backend/data/
 backend/budget_projection
+backend/backend
 
 # Frontend
 frontend/node_modules/
