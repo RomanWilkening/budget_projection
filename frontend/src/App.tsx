@@ -4,6 +4,7 @@ import DashboardPage from "./pages/DashboardPage";
 import PersonsPage from "./pages/PersonsPage";
 import AccountsPage from "./pages/AccountsPage";
 import PositionsPage from "./pages/PositionsPage";
+import ProjectionPage from "./pages/ProjectionPage";
 
 function App() {
   return (
@@ -16,6 +17,9 @@ function App() {
         <nav className="sidebar-nav">
           <NavLink to="/" end>
             <span className="nav-icon">📊</span> Übersicht
+          </NavLink>
+          <NavLink to="/projektion">
+            <span className="nav-icon">📈</span> Projektion
           </NavLink>
           <NavLink to="/personen">
             <span className="nav-icon">👤</span> Personen
@@ -31,6 +35,7 @@ function App() {
       <main className="main-content">
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/projektion" element={<ProjectionPage />} />
           <Route path="/personen" element={<PersonsPage />} />
           <Route path="/konten" element={<AccountsPage />} />
           <Route path="/positionen" element={<PositionsPage />} />

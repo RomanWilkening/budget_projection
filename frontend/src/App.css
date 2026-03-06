@@ -431,3 +431,48 @@ tr:hover td {
   color: var(--color-expense);
 }
 
+/* Projection controls */
+.projection-controls {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+/* Chart cards */
+.projection-chart-card,
+.dashboard-chart-card,
+.projection-table-card,
+.dashboard-table-card {
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.projection-chart-card h3,
+.dashboard-chart-card h3,
+.projection-table-card h3,
+.dashboard-table-card h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  margin-bottom: 1rem;
+}
+
+/* Dashboard charts row */
+.dashboard-charts-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Clickable card */
+.clickable {
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+

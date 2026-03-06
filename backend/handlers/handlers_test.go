@@ -57,6 +57,7 @@ func setupRouter() *gin.Engine {
 			positions.PUT("/:id", handlers.UpdatePosition)
 			positions.DELETE("/:id", handlers.DeletePosition)
 		}
+		api.GET("/projection", handlers.GetProjection)
 	}
 	return r
 }
@@ -432,6 +433,153 @@ func TestPositionValidation(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("Expected 400 for invalid position, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProjectionBasic(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create person
+	body, _ := json.Marshal(map[string]string{"name": "Eve"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/persons", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", w.Code)
+	}
+
+	// Create account with balance 1000
+	accountData := map[string]interface{}{
+		"name":     "Girokonto",
+		"balance":  1000.0,
+		"currency": "EUR",
+		"ownerIds": []uint{1},
+	}
+	body, _ = json.Marshal(accountData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create monthly income of 3000 starting 2026-01-01
+	dayOfMonth := 1
+	accountID := uint(1)
+	posData := map[string]interface{}{
+		"name":            "Gehalt",
+		"type":            "income",
+		"amount":          3000.00,
+		"accountId":       accountID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      dayOfMonth,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create monthly expense of 800 starting 2026-01-01
+	posData2 := map[string]interface{}{
+		"name":            "Miete",
+		"type":            "expense",
+		"amount":          800.00,
+		"accountId":       accountID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      dayOfMonth,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData2)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Get projection for 3 months starting 2026-01-01
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/projection?months=3&startDate=2026-01-01&granularity=monthly", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result struct {
+		Accounts []struct {
+			ID         uint   `json:"id"`
+			Name       string `json:"name"`
+			DataPoints []struct {
+				Date    string  `json:"date"`
+				Balance float64 `json:"balance"`
+			} `json:"dataPoints"`
+		} `json:"accounts"`
+		Totals []struct {
+			Date    string  `json:"date"`
+			Balance float64 `json:"balance"`
+		} `json:"totals"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+
+	if len(result.Accounts) != 1 {
+		t.Fatalf("Expected 1 account, got %d", len(result.Accounts))
+	}
+
+	if len(result.Totals) < 2 {
+		t.Fatalf("Expected at least 2 data points, got %d", len(result.Totals))
+	}
+
+	// Initial balance is 1000. On 2026-01-01: +3000 -800 = 1000+2200 = 3200
+	firstPoint := result.Accounts[0].DataPoints[0]
+	if firstPoint.Date != "2026-01-01" {
+		t.Fatalf("Expected first date '2026-01-01', got '%s'", firstPoint.Date)
+	}
+	if firstPoint.Balance != 3200.0 {
+		t.Fatalf("Expected first balance 3200.00, got %.2f", firstPoint.Balance)
+	}
+
+	// Second month (2026-02-01): 3200 + 3000 - 800 = 5400
+	secondPoint := result.Accounts[0].DataPoints[1]
+	if secondPoint.Balance != 5400.0 {
+		t.Fatalf("Expected second balance 5400.00, got %.2f", secondPoint.Balance)
+	}
+}
+
+func TestProjectionEmpty(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Get projection with no data
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/projection?months=1&startDate=2026-01-01&granularity=monthly", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result struct {
+		Accounts []interface{} `json:"accounts"`
+		Totals   []interface{} `json:"totals"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+
+	if len(result.Accounts) != 0 {
+		t.Fatalf("Expected 0 accounts, got %d", len(result.Accounts))
 	}
 }
 

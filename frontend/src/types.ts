@@ -55,3 +55,20 @@ export interface Position {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface ProjectionDataPoint {
+  date: string;
+  balance: number;
+}
+
+export interface AccountProjection {
+  id: number;
+  name: string;
+  currency: string;
+  dataPoints: ProjectionDataPoint[];
+}
+
+export interface ProjectionResponse {
+  accounts: AccountProjection[];
+  totals: ProjectionDataPoint[];
+}
