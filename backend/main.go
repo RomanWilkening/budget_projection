@@ -71,6 +71,16 @@ func setupRouter() *gin.Engine {
 			positions.POST("", handlers.CreatePosition)
 			positions.PUT("/:id", handlers.UpdatePosition)
 			positions.DELETE("/:id", handlers.DeletePosition)
+			positions.PUT("", handlers.ReorderPositions)
+		}
+
+		// Position Separators
+		separators := api.Group("/position-separators")
+		{
+			separators.GET("", handlers.ListSeparators)
+			separators.POST("", handlers.CreateSeparator)
+			separators.PUT("/:id", handlers.UpdateSeparator)
+			separators.DELETE("/:id", handlers.DeleteSeparator)
 		}
 
 		// Projection

@@ -59,6 +59,14 @@ func setupRouter() *gin.Engine {
 			positions.POST("", handlers.CreatePosition)
 			positions.PUT("/:id", handlers.UpdatePosition)
 			positions.DELETE("/:id", handlers.DeletePosition)
+			positions.PUT("", handlers.ReorderPositions)
+		}
+		separators := api.Group("/position-separators")
+		{
+			separators.GET("", handlers.ListSeparators)
+			separators.POST("", handlers.CreateSeparator)
+			separators.PUT("/:id", handlers.UpdateSeparator)
+			separators.DELETE("/:id", handlers.DeleteSeparator)
 		}
 		api.GET("/projection", handlers.GetProjection)
 
@@ -889,5 +897,164 @@ func TestIncomeWithSourceAccount(t *testing.T) {
 	// Total should remain constant
 	if result.Totals[0].Balance != 2500.0 {
 		t.Fatalf("Expected total balance 2500.00, got %.2f", result.Totals[0].Balance)
+	}
+}
+
+func TestSeparatorCRUD(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create separator
+	body, _ := json.Marshal(map[string]string{"name": "Fixkosten"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/position-separators", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var sep models.PositionSeparator
+	json.Unmarshal(w.Body.Bytes(), &sep)
+	if sep.Name != "Fixkosten" {
+		t.Fatalf("Expected name 'Fixkosten', got '%s'", sep.Name)
+	}
+	if sep.ID == 0 {
+		t.Fatal("Expected non-zero ID")
+	}
+
+	// List separators
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/position-separators", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+	var seps []models.PositionSeparator
+	json.Unmarshal(w.Body.Bytes(), &seps)
+	if len(seps) != 1 {
+		t.Fatalf("Expected 1 separator, got %d", len(seps))
+	}
+
+	// Update separator
+	body, _ = json.Marshal(map[string]string{"name": "Variable Kosten"})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/position-separators/1", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &sep)
+	if sep.Name != "Variable Kosten" {
+		t.Fatalf("Expected name 'Variable Kosten', got '%s'", sep.Name)
+	}
+
+	// Delete separator
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("DELETE", "/api/position-separators/1", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+
+	// Verify deleted
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/position-separators", nil)
+	router.ServeHTTP(w, req)
+	json.Unmarshal(w.Body.Bytes(), &seps)
+	if len(seps) != 0 {
+		t.Fatalf("Expected 0 separators after delete, got %d", len(seps))
+	}
+}
+
+func TestReorderPositions(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create account first
+	body, _ := json.Marshal(map[string]interface{}{
+		"name": "Girokonto", "balance": 1000, "currency": "EUR",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	// Create two positions
+	for _, name := range []string{"Miete", "Strom"} {
+		body, _ = json.Marshal(map[string]interface{}{
+			"name": name, "type": "expense", "amount": 100,
+			"accountId": 1, "frequencyType": "monthly",
+			"startDate": "2025-01-01",
+		})
+		w = httptest.NewRecorder()
+		req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Create a separator
+	body, _ = json.Marshal(map[string]string{"name": "Fixkosten"})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/position-separators", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Reorder: separator first, then Strom (id=2), then Miete (id=1)
+	reorder := []map[string]interface{}{
+		{"type": "separator", "id": 1},
+		{"type": "position", "id": 2},
+		{"type": "position", "id": 1},
+	}
+	body, _ = json.Marshal(reorder)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify order: positions should come back in order Strom, Miete
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/positions", nil)
+	router.ServeHTTP(w, req)
+
+	var positions []models.Position
+	json.Unmarshal(w.Body.Bytes(), &positions)
+	if len(positions) != 2 {
+		t.Fatalf("Expected 2 positions, got %d", len(positions))
+	}
+	if positions[0].Name != "Strom" {
+		t.Fatalf("Expected first position 'Strom', got '%s'", positions[0].Name)
+	}
+	if positions[1].Name != "Miete" {
+		t.Fatalf("Expected second position 'Miete', got '%s'", positions[1].Name)
+	}
+
+	// Verify separator order
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/position-separators", nil)
+	router.ServeHTTP(w, req)
+
+	var seps []models.PositionSeparator
+	json.Unmarshal(w.Body.Bytes(), &seps)
+	if len(seps) != 1 {
+		t.Fatalf("Expected 1 separator, got %d", len(seps))
+	}
+	if seps[0].SortOrder != 0 {
+		t.Fatalf("Expected separator sort order 0, got %d", seps[0].SortOrder)
 	}
 }
