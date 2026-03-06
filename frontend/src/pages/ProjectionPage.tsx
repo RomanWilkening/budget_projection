@@ -59,12 +59,14 @@ export default function ProjectionPage() {
 
   // Fetch persons and accounts once on mount
   useEffect(() => {
-    Promise.all([getPersons(), getAccounts()]).then(([p, a]) => {
-      setPersons(p);
-      setAccounts(a);
-      setSelectedPersonIds(new Set(p.map((pr) => pr.id)));
-      setSelectedAccountIds(new Set(a.map((ac) => ac.id)));
-    });
+    Promise.all([getPersons(), getAccounts()])
+      .then(([p, a]) => {
+        setPersons(p);
+        setAccounts(a);
+        setSelectedPersonIds(new Set(p.map((pr) => pr.id)));
+        setSelectedAccountIds(new Set(a.map((ac) => ac.id)));
+      })
+      .catch(() => { /* filter panel will simply not render */ });
   }, []);
 
   useEffect(() => {
@@ -161,8 +163,8 @@ export default function ProjectionPage() {
       startBalance: startBal,
       endBalance: endBal,
       change: endBal - startBal,
-      min: Math.min(...balances),
-      max: Math.max(...balances),
+      min: balances.length > 0 ? Math.min(...balances) : 0,
+      max: balances.length > 0 ? Math.max(...balances) : 0,
     };
   });
 
