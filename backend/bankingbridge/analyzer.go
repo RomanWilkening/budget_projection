@@ -172,7 +172,7 @@ func analyzeGroup(group *transactionGroup) *RecurringPattern {
 	}
 
 	// Find the last (most recent) transaction amount
-	lastAmount := math.Abs(amounts[n-1]) // default to last in slice
+	lastAmount := math.Abs(amounts[0]) // fallback if dates are unavailable
 	if len(group.dates) == n {
 		lastIdx := 0
 		lastDate := group.dates[0]
