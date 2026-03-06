@@ -224,6 +224,19 @@ export default function PositionsPage() {
   const freqLabel = (ft: string) =>
     FREQUENCY_TYPES.find((f) => f.value === ft)?.label ?? ft;
 
+  const formatAccountDisplay = (p: Position) => {
+    if (p.type === "transfer") {
+      return `${accountName(p.sourceAccountId)} → ${accountName(p.targetAccountId)}`;
+    }
+    if (p.type === "expense" && p.targetAccountId) {
+      return `${accountName(p.accountId)} → ${accountName(p.targetAccountId)}`;
+    }
+    if (p.type === "income" && p.sourceAccountId) {
+      return `${accountName(p.sourceAccountId)} → ${accountName(p.accountId)}`;
+    }
+    return accountName(p.accountId);
+  };
+
   const accountName = (id?: number) => {
     if (!id) return "–";
     return accounts.find((a) => a.id === id)?.name ?? `#${id}`;
@@ -271,15 +284,7 @@ export default function PositionsPage() {
                       {p.amount.toLocaleString("de-DE", { minimumFractionDigits: 2 })} €
                     </span>
                   </td>
-                  <td>
-                    {p.type === "transfer"
-                      ? `${accountName(p.sourceAccountId)} → ${accountName(p.targetAccountId)}`
-                      : p.type === "expense" && p.targetAccountId
-                        ? `${accountName(p.accountId)} → ${accountName(p.targetAccountId)}`
-                        : p.type === "income" && p.sourceAccountId
-                          ? `${accountName(p.sourceAccountId)} → ${accountName(p.accountId)}`
-                          : accountName(p.accountId)}
-                  </td>
+                  <td>{formatAccountDisplay(p)}</td>
                   <td>{freqLabel(p.frequencyType)}</td>
                   <td>{new Date(p.startDate).toLocaleDateString("de-DE")}</td>
                   <td>
