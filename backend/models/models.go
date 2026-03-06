@@ -1,10 +1,75 @@
 package models
 
 import (
+	"database/sql/driver"
+	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// FlexDate is a time.Time that accepts both "2006-01-02" and RFC3339 formats during JSON
+// unmarshaling, allowing date inputs from HTML <input type="date"> elements.
+type FlexDate struct {
+	time.Time
+}
+
+func (d *FlexDate) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(string(data), `"`)
+	if s == "null" || s == "" {
+		d.Time = time.Time{}
+		return nil
+	}
+	// Try date-only format first
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		d.Time = t
+		return nil
+	}
+	// Fall back to RFC3339
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return fmt.Errorf("cannot parse %q as date", s)
+	}
+	d.Time = t
+	return nil
+}
+
+func (d FlexDate) MarshalJSON() ([]byte, error) {
+	if d.Time.IsZero() {
+		return []byte("null"), nil
+	}
+	return []byte(`"` + d.Time.Format(time.RFC3339) + `"`), nil
+}
+
+// Value implements driver.Valuer so GORM can store FlexDate in the database.
+func (d FlexDate) Value() (driver.Value, error) {
+	return d.Time, nil
+}
+
+// Scan implements sql.Scanner so GORM can read FlexDate from the database.
+func (d *FlexDate) Scan(value interface{}) error {
+	switch v := value.(type) {
+	case time.Time:
+		d.Time = v
+	case string:
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			t, err = time.Parse("2006-01-02", v)
+			if err != nil {
+				return fmt.Errorf("cannot scan %q as FlexDate", v)
+			}
+		}
+		d.Time = t
+	case []byte:
+		return d.Scan(string(v))
+	case nil:
+		d.Time = time.Time{}
+	default:
+		return fmt.Errorf("unsupported type for FlexDate: %T", value)
+	}
+	return nil
+}
 
 // Person represents an individual who can own accounts.
 type Person struct {
@@ -81,8 +146,8 @@ type Position struct {
 	DayOfWeek       *int            `json:"dayOfWeek"`                       // 0=Sun..6=Sat, for weekly
 	BusinessDayRule BusinessDayRule `json:"businessDayRule" gorm:"default:exact"` // how to handle non-business days
 
-	StartDate       time.Time       `json:"startDate" gorm:"not null"`
-	EndDate         *time.Time      `json:"endDate"`                         // nil = indefinite
+	StartDate       FlexDate        `json:"startDate" gorm:"not null"`
+	EndDate         *FlexDate       `json:"endDate"`                         // nil = indefinite
 
 	CreatedAt       time.Time       `json:"createdAt"`
 	UpdatedAt       time.Time       `json:"updatedAt"`
