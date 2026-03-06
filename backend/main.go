@@ -14,6 +14,9 @@ func main() {
 	// Initialize database
 	database.Init()
 
+	// Load settings from DB (e.g., Banking Bridge URL)
+	handlers.InitBridgeClientFromDB()
+
 	// Set up Gin router
 	router := setupRouter()
 
@@ -79,6 +82,13 @@ func setupRouter() *gin.Engine {
 			bridge.GET("/status", handlers.GetBankingBridgeStatus)
 			bridge.GET("/accounts", handlers.ListBankingBridgeAccounts)
 			bridge.POST("/sync-all-balances", handlers.SyncAllBalances)
+		}
+
+		// Settings
+		settings := api.Group("/settings")
+		{
+			settings.GET("", handlers.GetSettings)
+			settings.PUT("", handlers.UpdateSettings)
 		}
 	}
 

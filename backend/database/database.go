@@ -40,6 +40,7 @@ func Init() {
 
 	// Auto-migrate the schema
 	if err := DB.AutoMigrate(
+		&models.Setting{},
 		&models.Person{},
 		&models.Account{},
 		&models.Position{},

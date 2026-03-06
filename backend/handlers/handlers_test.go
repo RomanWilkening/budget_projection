@@ -68,6 +68,11 @@ func setupRouter() *gin.Engine {
 			bridge.GET("/accounts", handlers.ListBankingBridgeAccounts)
 			bridge.POST("/sync-all-balances", handlers.SyncAllBalances)
 		}
+		settings := api.Group("/settings")
+		{
+			settings.GET("", handlers.GetSettings)
+			settings.PUT("", handlers.UpdateSettings)
+		}
 	}
 	return r
 }
@@ -606,5 +611,75 @@ func TestCreatePersonValidation(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("Expected 400 for missing name, got %d", w.Code)
+	}
+}
+
+func TestSettingsCRUD(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// GET settings (initially empty)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/settings", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var settings map[string]string
+	json.Unmarshal(w.Body.Bytes(), &settings)
+	if len(settings) != 0 {
+		t.Fatalf("Expected 0 settings, got %d", len(settings))
+	}
+
+	// PUT settings
+	body, _ := json.Marshal(map[string]string{
+		"banking_bridge_url": "http://bridge.local:9090",
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/settings", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	json.Unmarshal(w.Body.Bytes(), &settings)
+	if settings["banking_bridge_url"] != "http://bridge.local:9090" {
+		t.Fatalf("Expected banking_bridge_url 'http://bridge.local:9090', got '%s'", settings["banking_bridge_url"])
+	}
+
+	// GET settings again to verify persistence
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/settings", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+
+	json.Unmarshal(w.Body.Bytes(), &settings)
+	if settings["banking_bridge_url"] != "http://bridge.local:9090" {
+		t.Fatalf("Expected persisted banking_bridge_url, got '%s'", settings["banking_bridge_url"])
+	}
+
+	// Update setting to new value
+	body, _ = json.Marshal(map[string]string{
+		"banking_bridge_url": "http://new-bridge:8080",
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/settings", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	json.Unmarshal(w.Body.Bytes(), &settings)
+	if settings["banking_bridge_url"] != "http://new-bridge:8080" {
+		t.Fatalf("Expected updated URL, got '%s'", settings["banking_bridge_url"])
 	}
 }

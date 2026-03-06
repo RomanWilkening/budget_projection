@@ -71,6 +71,12 @@ func (d *FlexDate) Scan(value interface{}) error {
 	return nil
 }
 
+// Setting stores application configuration as key-value pairs.
+type Setting struct {
+	Key   string `json:"key" gorm:"primaryKey"`
+	Value string `json:"value"`
+}
+
 // Person represents an individual who can own accounts.
 type Person struct {
 	ID        uint           `json:"id" gorm:"primaryKey"`

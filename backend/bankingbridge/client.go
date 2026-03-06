@@ -61,12 +61,10 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new Banking Bridge client using the BANKING_BRIDGE_URL environment variable.
+// NewClient creates a new Banking Bridge client.
+// The URL can be set later via SetBaseURL or loaded from database settings.
 func NewClient() *Client {
 	baseURL := os.Getenv("BANKING_BRIDGE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
 	return &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
@@ -90,9 +88,14 @@ func (c *Client) GetBaseURL() string {
 	return c.baseURL
 }
 
-// IsConfigured returns true if the Banking Bridge URL is configured (non-default).
+// SetBaseURL updates the base URL at runtime.
+func (c *Client) SetBaseURL(url string) {
+	c.baseURL = url
+}
+
+// IsConfigured returns true if the Banking Bridge URL has been set.
 func (c *Client) IsConfigured() bool {
-	return os.Getenv("BANKING_BRIDGE_URL") != ""
+	return c.baseURL != ""
 }
 
 // GetAccounts fetches all accounts from the Banking Bridge.
