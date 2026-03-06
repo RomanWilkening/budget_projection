@@ -53,15 +53,7 @@ func CreatePosition(c *gin.Context) {
 	}
 
 	// Set sort order to the max + 1 so it appears at the end
-	var maxOrder int
-	database.DB.Raw(`
-		SELECT COALESCE(MAX(sort_order), -1) FROM (
-			SELECT sort_order FROM positions WHERE deleted_at IS NULL
-			UNION ALL
-			SELECT sort_order FROM position_separators WHERE deleted_at IS NULL
-		)
-	`).Scan(&maxOrder)
-	position.SortOrder = maxOrder + 1
+	position.SortOrder = nextSortOrder()
 
 	if err := database.DB.Create(&position).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -179,6 +171,10 @@ func ReorderPositions(c *gin.Context) {
 	}
 
 	tx := database.DB.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
 	for i, item := range items {
 		switch item.Type {
 		case "position":
@@ -199,7 +195,10 @@ func ReorderPositions(c *gin.Context) {
 			return
 		}
 	}
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Order updated"})
 }
@@ -214,4 +213,17 @@ func (e *validationError) Error() string {
 
 func errorf(format string, args ...interface{}) error {
 	return &validationError{msg: fmt.Sprintf(format, args...)}
+}
+
+// nextSortOrder returns the next available sort order for positions and separators.
+func nextSortOrder() int {
+	var maxOrder int
+	database.DB.Raw(`
+		SELECT COALESCE(MAX(sort_order), -1) FROM (
+			SELECT sort_order FROM positions WHERE deleted_at IS NULL
+			UNION ALL
+			SELECT sort_order FROM position_separators WHERE deleted_at IS NULL
+		)
+	`).Scan(&maxOrder)
+	return maxOrder + 1
 }

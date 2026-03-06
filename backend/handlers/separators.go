@@ -32,15 +32,7 @@ func CreateSeparator(c *gin.Context) {
 	}
 
 	// Set sort order to the max + 1 so it appears at the end
-	var maxOrder int
-	database.DB.Raw(`
-		SELECT COALESCE(MAX(sort_order), -1) FROM (
-			SELECT sort_order FROM positions WHERE deleted_at IS NULL
-			UNION ALL
-			SELECT sort_order FROM position_separators WHERE deleted_at IS NULL
-		)
-	`).Scan(&maxOrder)
-	separator.SortOrder = maxOrder + 1
+	separator.SortOrder = nextSortOrder()
 
 	if err := database.DB.Create(&separator).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

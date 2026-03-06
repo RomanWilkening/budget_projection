@@ -94,7 +94,7 @@ export default function PositionsPage() {
   const [editingSeparatorName, setEditingSeparatorName] = useState("");
 
   // Drag & drop state
-  const [dragItem, setDragItem] = useState<{ kind: string; id: number } | null>(null);
+  const [dragItem, setDragItem] = useState<{ kind: "position" | "separator"; id: number } | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const dragCounter = useRef(0);
 
@@ -119,7 +119,7 @@ export default function PositionsPage() {
   ].sort((a, b) => a.data.sortOrder - b.data.sortOrder);
 
   // Drag & drop handlers
-  const handleDragStart = (e: React.DragEvent, kind: string, id: number) => {
+  const handleDragStart = (e: React.DragEvent, kind: "position" | "separator", id: number) => {
     setDragItem({ kind, id });
     e.dataTransfer.effectAllowed = "move";
     const target = e.currentTarget as HTMLElement;
