@@ -30,10 +30,11 @@ func GetAccount(c *gin.Context) {
 }
 
 type createAccountInput struct {
-	Name     string `json:"name" binding:"required"`
-	Balance  float64 `json:"balance"`
-	Currency string `json:"currency"`
-	OwnerIDs []uint `json:"ownerIds"`
+	Name                   string `json:"name" binding:"required"`
+	Balance                float64 `json:"balance"`
+	Currency               string `json:"currency"`
+	OwnerIDs               []uint `json:"ownerIds"`
+	BankingBridgeAccountID *int   `json:"bankingBridgeAccountId"`
 }
 
 // CreateAccount creates a new account with optional owners.
@@ -45,9 +46,10 @@ func CreateAccount(c *gin.Context) {
 	}
 
 	account := models.Account{
-		Name:     input.Name,
-		Balance:  input.Balance,
-		Currency: input.Currency,
+		Name:                   input.Name,
+		Balance:                input.Balance,
+		Currency:               input.Currency,
+		BankingBridgeAccountID: input.BankingBridgeAccountID,
 	}
 	if account.Currency == "" {
 		account.Currency = "EUR"
@@ -77,10 +79,11 @@ func CreateAccount(c *gin.Context) {
 }
 
 type updateAccountInput struct {
-	Name     string  `json:"name" binding:"required"`
-	Balance  float64 `json:"balance"`
-	Currency string  `json:"currency"`
-	OwnerIDs []uint  `json:"ownerIds"`
+	Name                   string  `json:"name" binding:"required"`
+	Balance                float64 `json:"balance"`
+	Currency               string  `json:"currency"`
+	OwnerIDs               []uint  `json:"ownerIds"`
+	BankingBridgeAccountID *int    `json:"bankingBridgeAccountId"`
 }
 
 // UpdateAccount updates an account.
@@ -103,6 +106,7 @@ func UpdateAccount(c *gin.Context) {
 	if input.Currency != "" {
 		account.Currency = input.Currency
 	}
+	account.BankingBridgeAccountID = input.BankingBridgeAccountID
 
 	if err := database.DB.Save(&account).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

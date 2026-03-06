@@ -48,6 +48,9 @@ func setupRouter() *gin.Engine {
 			accounts.DELETE("/:id", handlers.DeleteAccount)
 			accounts.POST("/:id/owners", handlers.AddAccountOwner)
 			accounts.DELETE("/:id/owners/:personId", handlers.RemoveAccountOwner)
+			accounts.POST("/:id/link-banking-bridge", handlers.LinkBankingBridgeAccount)
+			accounts.POST("/:id/sync-balance", handlers.SyncAccountBalance)
+			accounts.GET("/:id/recurring-transactions", handlers.AnalyzeRecurringTransactions)
 		}
 		positions := api.Group("/positions")
 		{
@@ -58,6 +61,13 @@ func setupRouter() *gin.Engine {
 			positions.DELETE("/:id", handlers.DeletePosition)
 		}
 		api.GET("/projection", handlers.GetProjection)
+
+		bridge := api.Group("/banking-bridge")
+		{
+			bridge.GET("/status", handlers.GetBankingBridgeStatus)
+			bridge.GET("/accounts", handlers.ListBankingBridgeAccounts)
+			bridge.POST("/sync-all-balances", handlers.SyncAllBalances)
+		}
 	}
 	return r
 }

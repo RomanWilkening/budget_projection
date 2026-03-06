@@ -83,14 +83,15 @@ type Person struct {
 
 // Account represents a financial account that can be owned by one or more persons.
 type Account struct {
-	ID             uint           `json:"id" gorm:"primaryKey"`
-	Name           string         `json:"name" gorm:"not null"`
-	Balance        float64        `json:"balance" gorm:"default:0"`
-	Currency       string         `json:"currency" gorm:"default:EUR"`
-	Owners         []Person       `json:"owners,omitempty" gorm:"many2many:person_accounts;"`
-	CreatedAt      time.Time      `json:"createdAt"`
-	UpdatedAt      time.Time      `json:"updatedAt"`
-	DeletedAt      gorm.DeletedAt `json:"-" gorm:"index"`
+	ID                      uint           `json:"id" gorm:"primaryKey"`
+	Name                    string         `json:"name" gorm:"not null"`
+	Balance                 float64        `json:"balance" gorm:"default:0"`
+	Currency                string         `json:"currency" gorm:"default:EUR"`
+	BankingBridgeAccountID  *int           `json:"bankingBridgeAccountId,omitempty" gorm:"default:null"`
+	Owners                  []Person       `json:"owners,omitempty" gorm:"many2many:person_accounts;"`
+	CreatedAt               time.Time      `json:"createdAt"`
+	UpdatedAt               time.Time      `json:"updatedAt"`
+	DeletedAt               gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
 // FrequencyType defines how often a position recurs.
