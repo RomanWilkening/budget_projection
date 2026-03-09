@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Person } from "../types";
-import { getPersons, createPerson, updatePerson, deletePerson } from "../api";
+import { getPersons, createPerson, updatePerson, deletePerson, reorderPersons } from "../api";
 
 export default function PersonsPage() {
   const [persons, setPersons] = useState<Person[]>([]);
@@ -10,6 +10,11 @@ export default function PersonsPage() {
   const [editing, setEditing] = useState<Person | null>(null);
   const [formName, setFormName] = useState("");
   const [formError, setFormError] = useState("");
+
+  // Drag & drop state
+  const [dragItem, setDragItem] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragCounter = useRef(0);
 
   const load = () => {
     setLoading(true);
@@ -65,6 +70,67 @@ export default function PersonsPage() {
     }
   };
 
+  // Drag & drop handlers
+  const handleDragStart = (e: React.DragEvent, id: number) => {
+    setDragItem(id);
+    e.dataTransfer.effectAllowed = "move";
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add("dragging");
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    const target = e.currentTarget as HTMLElement;
+    target.classList.remove("dragging");
+    setDragItem(null);
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+  };
+
+  const handleDragEnter = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    dragCounter.current++;
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    dragCounter.current--;
+    if (dragCounter.current <= 0) {
+      setDragOverIndex(null);
+      dragCounter.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+
+    if (dragItem === null) return;
+
+    const dragIndex = persons.findIndex((p) => p.id === dragItem);
+    if (dragIndex === dropIndex || dragIndex === -1) return;
+
+    const newItems = [...persons];
+    const [moved] = newItems.splice(dragIndex, 1);
+    newItems.splice(dropIndex, 0, moved);
+
+    // Optimistic update
+    setPersons(newItems);
+    setDragItem(null);
+
+    try {
+      await reorderPersons(newItems.map((p) => p.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Sortieren");
+      load();
+    }
+  };
+
   return (
     <>
       <div className="page-header">
@@ -88,14 +154,26 @@ export default function PersonsPage() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 40 }}></th>
                 <th>Name</th>
                 <th>Erstellt</th>
                 <th style={{ width: 120 }}>Aktionen</th>
               </tr>
             </thead>
             <tbody>
-              {persons.map((p) => (
-                <tr key={p.id}>
+              {persons.map((p, index) => (
+                <tr
+                  key={p.id}
+                  className={dragOverIndex === index ? "drag-over" : ""}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, p.id)}
+                  onDragEnd={handleDragEnd}
+                  onDragEnter={(e) => handleDragEnter(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, index)}
+                >
+                  <td className="drag-handle">⠿</td>
                   <td>{p.name}</td>
                   <td>{new Date(p.createdAt).toLocaleDateString("de-DE")}</td>
                   <td>

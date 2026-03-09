@@ -25,9 +25,18 @@ type AccountProjection struct {
 	DataPoints []ProjectionDataPoint `json:"dataPoints"`
 }
 
+// DepotProjection contains the projected value over time for one depot.
+type DepotProjection struct {
+	ID           uint                  `json:"id"`
+	Name         string                `json:"name"`
+	InterestRate float64               `json:"interestRate"`
+	DataPoints   []ProjectionDataPoint `json:"dataPoints"`
+}
+
 // ProjectionResponse is the API response for the projection endpoint.
 type ProjectionResponse struct {
 	Accounts []AccountProjection   `json:"accounts"`
+	Depots   []DepotProjection     `json:"depots"`
 	Totals   []ProjectionDataPoint `json:"totals"`
 }
 
@@ -72,7 +81,7 @@ func GetProjection(c *gin.Context) {
 		}
 	}
 
-	// Load accounts and positions
+	// Load accounts, positions, and depots
 	var accounts []models.Account
 	if err := database.DB.Find(&accounts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -81,6 +90,12 @@ func GetProjection(c *gin.Context) {
 
 	var positions []models.Position
 	if err := database.DB.Find(&positions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var depots []models.Depot
+	if err := database.DB.Preload("Accounts").Find(&depots).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -207,6 +222,7 @@ func GetProjection(c *gin.Context) {
 	// Build response
 	result := ProjectionResponse{
 		Accounts: make([]AccountProjection, 0, len(accounts)),
+		Depots:   make([]DepotProjection, 0, len(depots)),
 		Totals:   totals,
 	}
 	for _, a := range accounts {
@@ -216,6 +232,57 @@ func GetProjection(c *gin.Context) {
 			Currency:   a.Currency,
 			DataPoints: accountProjections[a.ID],
 		})
+	}
+
+	// Build depot projections: aggregate linked account balances and apply compound interest
+	for _, depot := range depots {
+		dp := DepotProjection{
+			ID:           depot.ID,
+			Name:         depot.Name,
+			InterestRate: depot.InterestRate,
+			DataPoints:   make([]ProjectionDataPoint, 0, len(dates)),
+		}
+
+		// Collect linked account IDs
+		linkedAccountIDs := make(map[uint]bool)
+		for _, a := range depot.Accounts {
+			linkedAccountIDs[a.ID] = true
+		}
+
+		// Daily interest rate from annual rate
+		dailyRate := depot.InterestRate / 100.0 / 365.0
+
+		// Track accumulated interest separately
+		accumulatedInterest := 0.0
+		var prevDate time.Time
+
+		for i, d := range dates {
+			// Sum up account balances for this depot at this date
+			accountSum := 0.0
+			for aID := range linkedAccountIDs {
+				if pts, ok := accountProjections[aID]; ok && i < len(pts) {
+					accountSum += pts[i].Balance
+				}
+			}
+
+			// Apply compound interest: grow based on days elapsed since last data point
+			if i > 0 && dailyRate != 0 {
+				daysElapsed := d.Sub(prevDate).Hours() / 24.0
+				// Compound on the previous total depot value (accounts + interest)
+				lastValue := dp.DataPoints[i-1].Balance
+				interestForPeriod := lastValue * dailyRate * daysElapsed
+				accumulatedInterest += interestForPeriod
+			}
+
+			depotValue := accountSum + accumulatedInterest
+			dp.DataPoints = append(dp.DataPoints, ProjectionDataPoint{
+				Date:    d.Format("2006-01-02"),
+				Balance: roundToTwoDecimals(depotValue),
+			})
+			prevDate = d
+		}
+
+		result.Depots = append(result.Depots, dp)
 	}
 
 	c.JSON(http.StatusOK, result)

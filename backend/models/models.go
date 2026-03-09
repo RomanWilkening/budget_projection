@@ -81,6 +81,7 @@ type Setting struct {
 type Person struct {
 	ID        uint           `json:"id" gorm:"primaryKey"`
 	Name      string         `json:"name" gorm:"not null"`
+	SortOrder int            `json:"sortOrder" gorm:"default:0"`
 	Accounts  []Account      `json:"accounts,omitempty" gorm:"many2many:person_accounts;"`
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
@@ -93,7 +94,9 @@ type Account struct {
 	Name                    string         `json:"name" gorm:"not null"`
 	Balance                 float64        `json:"balance" gorm:"default:0"`
 	Currency                string         `json:"currency" gorm:"default:EUR"`
-	BankingBridgeAccountID  *int           `json:"bankingBridgeAccountId,omitempty" gorm:"default:null"`
+	SortOrder               int            `json:"sortOrder" gorm:"default:0"`
+	ShowInProjection        *bool          `json:"showInProjection" gorm:"not null;default:1"`
+	BankingBridgeAccountID  *int           `json:"bankingBridgeAccountId,omitempty"`
 	Owners                  []Person       `json:"owners,omitempty" gorm:"many2many:person_accounts;"`
 	CreatedAt               time.Time      `json:"createdAt"`
 	UpdatedAt               time.Time      `json:"updatedAt"`
@@ -171,4 +174,17 @@ type PositionSeparator struct {
 	CreatedAt time.Time      `json:"createdAt"`
 	UpdatedAt time.Time      `json:"updatedAt"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
+// Depot represents a virtual investment portfolio that aggregates multiple accounts
+// and applies a configurable annual interest rate for projection purposes.
+type Depot struct {
+	ID           uint           `json:"id" gorm:"primaryKey"`
+	Name         string         `json:"name" gorm:"not null"`
+	InterestRate float64        `json:"interestRate" gorm:"default:0"` // annual interest rate in percent (e.g. 5.0 = 5%)
+	SortOrder    int            `json:"sortOrder" gorm:"default:0"`
+	Accounts     []Account      `json:"accounts,omitempty" gorm:"many2many:depot_accounts;"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
 }

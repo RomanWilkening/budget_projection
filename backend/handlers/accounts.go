@@ -11,7 +11,7 @@ import (
 // ListAccounts returns all accounts with their owners.
 func ListAccounts(c *gin.Context) {
 	var accounts []models.Account
-	if err := database.DB.Preload("Owners").Find(&accounts).Error; err != nil {
+	if err := database.DB.Preload("Owners").Order("sort_order ASC, id ASC").Find(&accounts).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -33,6 +33,7 @@ type createAccountInput struct {
 	Name                   string `json:"name" binding:"required"`
 	Balance                float64 `json:"balance"`
 	Currency               string `json:"currency"`
+	ShowInProjection       *bool  `json:"showInProjection"`
 	OwnerIDs               []uint `json:"ownerIds"`
 	BankingBridgeAccountID *int   `json:"bankingBridgeAccountId"`
 }
@@ -45,11 +46,16 @@ func CreateAccount(c *gin.Context) {
 		return
 	}
 
+	showInProjection := true
 	account := models.Account{
 		Name:                   input.Name,
 		Balance:                input.Balance,
 		Currency:               input.Currency,
+		ShowInProjection:       &showInProjection,
 		BankingBridgeAccountID: input.BankingBridgeAccountID,
+	}
+	if input.ShowInProjection != nil {
+		account.ShowInProjection = input.ShowInProjection
 	}
 	if account.Currency == "" {
 		account.Currency = "EUR"
@@ -82,6 +88,7 @@ type updateAccountInput struct {
 	Name                   string  `json:"name" binding:"required"`
 	Balance                float64 `json:"balance"`
 	Currency               string  `json:"currency"`
+	ShowInProjection       *bool   `json:"showInProjection"`
 	OwnerIDs               []uint  `json:"ownerIds"`
 	BankingBridgeAccountID *int    `json:"bankingBridgeAccountId"`
 }
@@ -105,6 +112,9 @@ func UpdateAccount(c *gin.Context) {
 	account.Balance = input.Balance
 	if input.Currency != "" {
 		account.Currency = input.Currency
+	}
+	if input.ShowInProjection != nil {
+		account.ShowInProjection = input.ShowInProjection
 	}
 	account.BankingBridgeAccountID = input.BankingBridgeAccountID
 
@@ -198,4 +208,32 @@ func RemoveAccountOwner(c *gin.Context) {
 
 	database.DB.Preload("Owners").First(&account, account.ID)
 	c.JSON(http.StatusOK, account)
+}
+
+// ReorderAccounts updates the sort order of accounts.
+func ReorderAccounts(c *gin.Context) {
+	var ids []uint
+	if err := c.ShouldBindJSON(&ids); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tx := database.DB.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
+	for i, id := range ids {
+		if err := tx.Model(&models.Account{}).Where("id = ?", id).Update("sort_order", i).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Order updated"})
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Account, Person, BridgeAccount, BridgeStatus } from "../types";
 import {
   getAccounts,
@@ -13,17 +13,19 @@ import {
   linkBankingBridgeAccount,
   syncAccountBalance,
   syncAllBalances,
+  reorderAccounts,
 } from "../api";
 
 interface FormState {
   name: string;
   balance: string;
   currency: string;
+  showInProjection: boolean;
   ownerIds: number[];
   bankingBridgeAccountId: string;
 }
 
-const emptyForm: FormState = { name: "", balance: "0", currency: "EUR", ownerIds: [], bankingBridgeAccountId: "" };
+const emptyForm: FormState = { name: "", balance: "0", currency: "EUR", showInProjection: true, ownerIds: [], bankingBridgeAccountId: "" };
 
 export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -38,6 +40,11 @@ export default function AccountsPage() {
   const [formError, setFormError] = useState("");
   const [syncing, setSyncing] = useState<number | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
+
+  // Drag & drop state
+  const [dragItem, setDragItem] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragCounter = useRef(0);
 
   const load = () => {
     setLoading(true);
@@ -81,6 +88,7 @@ export default function AccountsPage() {
       name: a.name,
       balance: String(a.balance),
       currency: a.currency,
+      showInProjection: a.showInProjection,
       ownerIds: a.owners?.map((o) => o.id) ?? [],
       bankingBridgeAccountId: a.bankingBridgeAccountId ? String(a.bankingBridgeAccountId) : "",
     });
@@ -113,7 +121,7 @@ export default function AccountsPage() {
 
     try {
       if (editing) {
-        await updateAccount(editing.id, { name, balance, currency });
+        await updateAccount(editing.id, { name, balance, currency, showInProjection: form.showInProjection });
         const existingIds = editing.owners?.map((o) => o.id) ?? [];
         const toAdd = form.ownerIds.filter((id) => !existingIds.includes(id));
         const toRemove = existingIds.filter((id) => !form.ownerIds.includes(id));
@@ -128,7 +136,7 @@ export default function AccountsPage() {
           await linkBankingBridgeAccount(editing.id, newBridgeId);
         }
       } else {
-        const created = await createAccount({ name, balance, currency });
+        const created = await createAccount({ name, balance, currency, showInProjection: form.showInProjection });
         await Promise.all(form.ownerIds.map((pid) => addAccountOwner(created.id, pid)));
         // Link to Banking Bridge if selected
         if (form.bankingBridgeAccountId) {
@@ -182,6 +190,66 @@ export default function AccountsPage() {
     return ba ? `${ba.name} (${ba.bank})` : `#${bridgeId}`;
   };
 
+  // Drag & drop handlers
+  const handleDragStart = (e: React.DragEvent, id: number) => {
+    setDragItem(id);
+    e.dataTransfer.effectAllowed = "move";
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add("dragging");
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    const target = e.currentTarget as HTMLElement;
+    target.classList.remove("dragging");
+    setDragItem(null);
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+  };
+
+  const handleDragEnter = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    dragCounter.current++;
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    dragCounter.current--;
+    if (dragCounter.current <= 0) {
+      setDragOverIndex(null);
+      dragCounter.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+
+    if (dragItem === null) return;
+
+    const dragIndex = accounts.findIndex((a) => a.id === dragItem);
+    if (dragIndex === dropIndex || dragIndex === -1) return;
+
+    const newItems = [...accounts];
+    const [moved] = newItems.splice(dragIndex, 1);
+    newItems.splice(dropIndex, 0, moved);
+
+    setAccounts(newItems);
+    setDragItem(null);
+
+    try {
+      await reorderAccounts(newItems.map((a) => a.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Sortieren");
+      load();
+    }
+  };
+
   const hasLinkedAccounts = accounts.some((a) => a.bankingBridgeAccountId);
 
   const formatCurrency = (amount: number, currency: string) =>
@@ -233,17 +301,30 @@ export default function AccountsPage() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 40 }}></th>
                 <th>Name</th>
                 <th>Kontostand</th>
                 <th>Währung</th>
+                <th>Projektion</th>
                 <th>Inhaber</th>
                 {bridgeStatus?.connected && <th>Banking Bridge</th>}
                 <th style={{ width: 160 }}>Aktionen</th>
               </tr>
             </thead>
             <tbody>
-              {accounts.map((a) => (
-                <tr key={a.id}>
+              {accounts.map((a, index) => (
+                <tr
+                  key={a.id}
+                  className={dragOverIndex === index ? "drag-over" : ""}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, a.id)}
+                  onDragEnd={handleDragEnd}
+                  onDragEnter={(e) => handleDragEnter(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, index)}
+                >
+                  <td className="drag-handle">⠿</td>
                   <td>{a.name}</td>
                   <td>
                     <span className={`amount ${a.balance >= 0 ? "amount-positive" : "amount-negative"}`}>
@@ -251,6 +332,11 @@ export default function AccountsPage() {
                     </span>
                   </td>
                   <td>{a.currency}</td>
+                  <td>
+                    <span style={{ color: a.showInProjection ? "#2e7d32" : "#999", fontSize: "0.9rem" }}>
+                      {a.showInProjection ? "✅ Ja" : "— Nein"}
+                    </span>
+                  </td>
                   <td>
                     <div className="tag-list">
                       {a.owners?.map((o) => (
@@ -335,6 +421,16 @@ export default function AccountsPage() {
                     <option value="CHF">CHF</option>
                   </select>
                 </div>
+              </div>
+              <div className="form-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={form.showInProjection}
+                    onChange={(e) => setForm({ ...form, showInProjection: e.target.checked })}
+                  />{" "}
+                  In Projektion anzeigen
+                </label>
               </div>
               {persons.length > 0 && (
                 <div className="form-group">
