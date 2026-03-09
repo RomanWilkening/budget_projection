@@ -594,6 +594,115 @@ func TestProjectionBasic(t *testing.T) {
 	}
 }
 
+func TestProjectionMonthlyNetFlow(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create person
+	body, _ := json.Marshal(map[string]string{"name": "Alice"})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/persons", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d", w.Code)
+	}
+
+	// Create account with balance 500
+	accountData := map[string]interface{}{
+		"name":     "Sparkonto",
+		"balance":  500.0,
+		"currency": "EUR",
+		"ownerIds": []uint{1},
+	}
+	body, _ = json.Marshal(accountData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create monthly income of 2000 starting 2026-01-01
+	dayOfMonth := 1
+	accountID := uint(1)
+	posData := map[string]interface{}{
+		"name":            "Gehalt",
+		"type":            "income",
+		"amount":          2000.00,
+		"accountId":       accountID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      dayOfMonth,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create monthly expense of 500 starting 2026-01-01
+	posData2 := map[string]interface{}{
+		"name":            "Miete",
+		"type":            "expense",
+		"amount":          500.00,
+		"accountId":       accountID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      dayOfMonth,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData2)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Get projection for 6 months starting 2026-01-01
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/projection?months=6&startDate=2026-01-01&granularity=monthly", nil)
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result struct {
+		Accounts []struct {
+			ID             uint    `json:"id"`
+			Name           string  `json:"name"`
+			MonthlyNetFlow float64 `json:"monthlyNetFlow"`
+			DataPoints     []struct {
+				Date    string  `json:"date"`
+				Balance float64 `json:"balance"`
+			} `json:"dataPoints"`
+		} `json:"accounts"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &result)
+
+	if len(result.Accounts) != 1 {
+		t.Fatalf("Expected 1 account, got %d", len(result.Accounts))
+	}
+
+	// Net flow per month: +2000 - 500 = +1500/month
+	// Over 6 months: 6 * 1500 = 9000 total change
+	// monthlyNetFlow = 9000 / 6 = 1500
+	acc := result.Accounts[0]
+	if acc.MonthlyNetFlow != 1500.0 {
+		t.Fatalf("Expected monthlyNetFlow 1500.00, got %.2f", acc.MonthlyNetFlow)
+	}
+}
+
 func TestProjectionEmpty(t *testing.T) {
 	setupTestDB(t)
 	router := setupRouter()
