@@ -11,7 +11,7 @@ import (
 // ListDepots returns all depots with their linked accounts.
 func ListDepots(c *gin.Context) {
 	var depots []models.Depot
-	if err := database.DB.Preload("Accounts").Find(&depots).Error; err != nil {
+	if err := database.DB.Preload("Accounts").Order("sort_order ASC, id ASC").Find(&depots).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -127,4 +127,32 @@ func DeleteDepot(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Depot deleted"})
+}
+
+// ReorderDepots updates the sort order of depots.
+func ReorderDepots(c *gin.Context) {
+	var ids []uint
+	if err := c.ShouldBindJSON(&ids); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	tx := database.DB.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
+	for i, id := range ids {
+		if err := tx.Model(&models.Depot{}).Where("id = ?", id).Update("sort_order", i).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Order updated"})
 }

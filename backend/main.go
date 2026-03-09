@@ -46,6 +46,7 @@ func setupRouter() *gin.Engine {
 			persons.POST("", handlers.CreatePerson)
 			persons.PUT("/:id", handlers.UpdatePerson)
 			persons.DELETE("/:id", handlers.DeletePerson)
+			persons.PUT("", handlers.ReorderPersons)
 		}
 
 		// Accounts
@@ -61,6 +62,7 @@ func setupRouter() *gin.Engine {
 			accounts.POST("/:id/link-banking-bridge", handlers.LinkBankingBridgeAccount)
 			accounts.POST("/:id/sync-balance", handlers.SyncAccountBalance)
 			accounts.GET("/:id/recurring-transactions", handlers.AnalyzeRecurringTransactions)
+			accounts.PUT("", handlers.ReorderAccounts)
 		}
 
 		// Positions
@@ -91,6 +93,7 @@ func setupRouter() *gin.Engine {
 			depots.POST("", handlers.CreateDepot)
 			depots.PUT("/:id", handlers.UpdateDepot)
 			depots.DELETE("/:id", handlers.DeleteDepot)
+			depots.PUT("", handlers.ReorderDepots)
 		}
 
 		// Projection

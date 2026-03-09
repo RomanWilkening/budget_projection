@@ -38,6 +38,7 @@ func setupRouter() *gin.Engine {
 			persons.POST("", handlers.CreatePerson)
 			persons.PUT("/:id", handlers.UpdatePerson)
 			persons.DELETE("/:id", handlers.DeletePerson)
+			persons.PUT("", handlers.ReorderPersons)
 		}
 		accounts := api.Group("/accounts")
 		{
@@ -51,6 +52,7 @@ func setupRouter() *gin.Engine {
 			accounts.POST("/:id/link-banking-bridge", handlers.LinkBankingBridgeAccount)
 			accounts.POST("/:id/sync-balance", handlers.SyncAccountBalance)
 			accounts.GET("/:id/recurring-transactions", handlers.AnalyzeRecurringTransactions)
+			accounts.PUT("", handlers.ReorderAccounts)
 		}
 		positions := api.Group("/positions")
 		{
@@ -75,6 +77,7 @@ func setupRouter() *gin.Engine {
 			depots.POST("", handlers.CreateDepot)
 			depots.PUT("/:id", handlers.UpdateDepot)
 			depots.DELETE("/:id", handlers.DeleteDepot)
+			depots.PUT("", handlers.ReorderDepots)
 		}
 		api.GET("/projection", handlers.GetProjection)
 
@@ -1342,5 +1345,194 @@ func TestDepotWithMixedBankingBridgeAccounts(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &depot)
 	if len(depot.Accounts) != 2 {
 		t.Fatalf("Expected 2 accounts, got %d", len(depot.Accounts))
+	}
+}
+
+func TestReorderPersons(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create two persons
+	for _, name := range []string{"Alice", "Bob"} {
+		body, _ := json.Marshal(map[string]string{"name": name})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/persons", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d", w.Code)
+		}
+	}
+
+	// Reorder: Bob (id=2) first, Alice (id=1) second
+	body, _ := json.Marshal([]uint{2, 1})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/persons", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// List and verify order
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/persons", nil)
+	router.ServeHTTP(w, req)
+
+	var persons []models.Person
+	json.Unmarshal(w.Body.Bytes(), &persons)
+	if len(persons) != 2 {
+		t.Fatalf("Expected 2 persons, got %d", len(persons))
+	}
+	if persons[0].Name != "Bob" {
+		t.Fatalf("Expected first person 'Bob', got '%s'", persons[0].Name)
+	}
+	if persons[1].Name != "Alice" {
+		t.Fatalf("Expected second person 'Alice', got '%s'", persons[1].Name)
+	}
+}
+
+func TestReorderAccounts(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create two accounts
+	for _, name := range []string{"Konto A", "Konto B"} {
+		body, _ := json.Marshal(map[string]interface{}{"name": name, "balance": 0, "currency": "EUR"})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d", w.Code)
+		}
+	}
+
+	// Reorder: B (id=2) first, A (id=1) second
+	body, _ := json.Marshal([]uint{2, 1})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// List and verify order
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/accounts", nil)
+	router.ServeHTTP(w, req)
+
+	var accounts []models.Account
+	json.Unmarshal(w.Body.Bytes(), &accounts)
+	if len(accounts) != 2 {
+		t.Fatalf("Expected 2 accounts, got %d", len(accounts))
+	}
+	if accounts[0].Name != "Konto B" {
+		t.Fatalf("Expected first account 'Konto B', got '%s'", accounts[0].Name)
+	}
+	if accounts[1].Name != "Konto A" {
+		t.Fatalf("Expected second account 'Konto A', got '%s'", accounts[1].Name)
+	}
+}
+
+func TestReorderDepots(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create two depots
+	for _, name := range []string{"Depot A", "Depot B"} {
+		body, _ := json.Marshal(map[string]interface{}{"name": name, "interestRate": 5.0})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/depots", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("Expected 201, got %d", w.Code)
+		}
+	}
+
+	// Reorder: B (id=2) first, A (id=1) second
+	body, _ := json.Marshal([]uint{2, 1})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/depots", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// List and verify order
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/depots", nil)
+	router.ServeHTTP(w, req)
+
+	var depots []models.Depot
+	json.Unmarshal(w.Body.Bytes(), &depots)
+	if len(depots) != 2 {
+		t.Fatalf("Expected 2 depots, got %d", len(depots))
+	}
+	if depots[0].Name != "Depot B" {
+		t.Fatalf("Expected first depot 'Depot B', got '%s'", depots[0].Name)
+	}
+	if depots[1].Name != "Depot A" {
+		t.Fatalf("Expected second depot 'Depot A', got '%s'", depots[1].Name)
+	}
+}
+
+func TestAccountShowInProjection(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create account – should default to showInProjection=true
+	body, _ := json.Marshal(map[string]interface{}{
+		"name": "Visible Account", "balance": 1000, "currency": "EUR",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var acc models.Account
+	json.Unmarshal(w.Body.Bytes(), &acc)
+	if acc.ShowInProjection == nil || !*acc.ShowInProjection {
+		t.Fatal("Expected showInProjection to default to true")
+	}
+
+	// Create account with showInProjection=false
+	showFalse := false
+	body, _ = json.Marshal(map[string]interface{}{
+		"name": "Hidden Account", "balance": 500, "currency": "EUR",
+		"showInProjection": showFalse,
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &acc)
+	if acc.ShowInProjection == nil || *acc.ShowInProjection {
+		t.Fatal("Expected showInProjection to be false")
+	}
+
+	// Update first account to hide from projection
+	body, _ = json.Marshal(map[string]interface{}{
+		"name": "Visible Account", "balance": 1000, "currency": "EUR",
+		"showInProjection": false,
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/accounts/1", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	json.Unmarshal(w.Body.Bytes(), &acc)
+	if acc.ShowInProjection == nil || *acc.ShowInProjection {
+		t.Fatal("Expected showInProjection to be false after update")
 	}
 }
