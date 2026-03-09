@@ -40,12 +40,36 @@ type ProjectionResponse struct {
 	Totals   []ProjectionDataPoint `json:"totals"`
 }
 
+// ScenarioRequest contains temporary position modifications for scenario projections.
+// These modifications are applied in-memory only and do not change stored data.
+type ScenarioRequest struct {
+	ModifiedPositions  []models.Position `json:"modifiedPositions"`  // existing positions with changed fields
+	RemovedPositionIDs []uint            `json:"removedPositionIds"` // IDs of positions to exclude
+	NewPositions       []models.Position `json:"newPositions"`       // virtual positions to add
+}
+
 // GetProjection computes projected account balances over a time period.
 // Query parameters:
 //   - months: number of months to project (default: 6)
 //   - startDate: projection start date in YYYY-MM-DD (default: today)
 //   - granularity: "daily", "weekly", or "monthly" (default: auto based on months)
 func GetProjection(c *gin.Context) {
+	projectionHandler(c, nil)
+}
+
+// PostProjectionScenario computes projected account balances with scenario modifications.
+// Accepts the same query parameters as GetProjection, plus a JSON body with ScenarioRequest.
+func PostProjectionScenario(c *gin.Context) {
+	var scenario ScenarioRequest
+	if err := c.ShouldBindJSON(&scenario); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	projectionHandler(c, &scenario)
+}
+
+// projectionHandler is the shared implementation for both GET and POST projection endpoints.
+func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 	// Parse parameters
 	months := 6
 	if m := c.Query("months"); m != "" {
@@ -98,6 +122,11 @@ func GetProjection(c *gin.Context) {
 	if err := database.DB.Preload("Accounts").Find(&depots).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Apply scenario modifications if provided
+	if scenario != nil {
+		positions = applyScenario(positions, scenario)
 	}
 
 	// Build balance map: account ID -> current balance
@@ -286,6 +315,39 @@ func GetProjection(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// applyScenario applies scenario modifications to the positions list without modifying the originals.
+func applyScenario(positions []models.Position, scenario *ScenarioRequest) []models.Position {
+	// Build set of removed IDs
+	removedIDs := make(map[uint]bool, len(scenario.RemovedPositionIDs))
+	for _, id := range scenario.RemovedPositionIDs {
+		removedIDs[id] = true
+	}
+
+	// Build map of modified positions (by ID)
+	modifiedMap := make(map[uint]models.Position, len(scenario.ModifiedPositions))
+	for _, p := range scenario.ModifiedPositions {
+		modifiedMap[p.ID] = p
+	}
+
+	// Build result: filter out removed, replace modified
+	result := make([]models.Position, 0, len(positions)+len(scenario.NewPositions))
+	for _, pos := range positions {
+		if removedIDs[pos.ID] {
+			continue
+		}
+		if mod, ok := modifiedMap[pos.ID]; ok {
+			result = append(result, mod)
+		} else {
+			result = append(result, pos)
+		}
+	}
+
+	// Append new virtual positions
+	result = append(result, scenario.NewPositions...)
+
+	return result
 }
 
 // generateOccurrences returns all dates when a position occurs within [start, end).
