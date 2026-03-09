@@ -1578,6 +1578,8 @@ func TestProjectionScenario(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	var incomePos models.Position
+	json.Unmarshal(w.Body.Bytes(), &incomePos)
 
 	// Create monthly expense of 800 starting 2026-01-01
 	posData2 := map[string]interface{}{
@@ -1599,6 +1601,8 @@ func TestProjectionScenario(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	var expensePos models.Position
+	json.Unmarshal(w.Body.Bytes(), &expensePos)
 
 	// Baseline: GET projection for 3 months
 	w = httptest.NewRecorder()
@@ -1625,9 +1629,9 @@ func TestProjectionScenario(t *testing.T) {
 		t.Fatalf("Baseline day1 expected 3200, got %.2f", baseline.Accounts[0].DataPoints[0].Balance)
 	}
 
-	// Scenario 1: Remove the expense (position ID 2)
+	// Scenario 1: Remove the expense
 	scenario1 := map[string]interface{}{
-		"removedPositionIds": []uint{2},
+		"removedPositionIds": []uint{expensePos.ID},
 	}
 	body, _ = json.Marshal(scenario1)
 	w = httptest.NewRecorder()
@@ -1645,11 +1649,11 @@ func TestProjectionScenario(t *testing.T) {
 		t.Fatalf("Scenario1 day1 expected 4000, got %.2f", scenario1Result.Accounts[0].DataPoints[0].Balance)
 	}
 
-	// Scenario 2: Modify the income amount (position ID 1) to 5000
+	// Scenario 2: Modify the income amount to 5000
 	scenario2 := map[string]interface{}{
 		"modifiedPositions": []map[string]interface{}{
 			{
-				"id":              1,
+				"id":              incomePos.ID,
 				"name":            "Gehalt",
 				"type":            "income",
 				"amount":          5000.00,
