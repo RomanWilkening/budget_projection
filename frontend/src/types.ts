@@ -79,6 +79,7 @@ export interface AccountProjection {
   name: string;
   currency: string;
   dataPoints: ProjectionDataPoint[];
+  monthlyNetFlow: number;
 }
 
 export interface ProjectionResponse {

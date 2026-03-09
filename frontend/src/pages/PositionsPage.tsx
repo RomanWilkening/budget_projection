@@ -239,7 +239,7 @@ export default function PositionsPage() {
     form.frequencyType === "semi_annually" ||
     form.frequencyType === "annually";
   const needsMonthOfYear =
-    form.frequencyType === "semi_annually" || form.frequencyType === "annually";
+    form.frequencyType === "quarterly" || form.frequencyType === "semi_annually" || form.frequencyType === "annually";
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -709,7 +709,7 @@ export default function PositionsPage() {
                   </div>
                   {needsMonthOfYear && (
                     <div className="form-group">
-                      <label>Monat</label>
+                      <label>Startmonat</label>
                       <select
                         value={form.monthOfYear}
                         onChange={(e) => setField("monthOfYear", e.target.value)}

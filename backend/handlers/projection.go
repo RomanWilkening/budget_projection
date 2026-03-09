@@ -19,10 +19,11 @@ type ProjectionDataPoint struct {
 
 // AccountProjection contains the projected balance over time for one account.
 type AccountProjection struct {
-	ID         uint                  `json:"id"`
-	Name       string                `json:"name"`
-	Currency   string                `json:"currency"`
-	DataPoints []ProjectionDataPoint `json:"dataPoints"`
+	ID              uint                  `json:"id"`
+	Name            string                `json:"name"`
+	Currency        string                `json:"currency"`
+	DataPoints      []ProjectionDataPoint `json:"dataPoints"`
+	MonthlyNetFlow  float64               `json:"monthlyNetFlow"`
 }
 
 // DepotProjection contains the projected value over time for one depot.
@@ -255,11 +256,17 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 		Totals:   totals,
 	}
 	for _, a := range accounts {
+		pts := accountProjections[a.ID]
+		var monthlyNet float64
+		if len(pts) >= 1 && months > 0 {
+			monthlyNet = roundToTwoDecimals((pts[len(pts)-1].Balance - a.Balance) / float64(months))
+		}
 		result.Accounts = append(result.Accounts, AccountProjection{
-			ID:         a.ID,
-			Name:       a.Name,
-			Currency:   a.Currency,
-			DataPoints: accountProjections[a.ID],
+			ID:             a.ID,
+			Name:           a.Name,
+			Currency:       a.Currency,
+			DataPoints:     pts,
+			MonthlyNetFlow: monthlyNet,
 		})
 	}
 
@@ -436,7 +443,11 @@ func generateOccurrences(pos models.Position, start, end time.Time) []time.Time 
 		if pos.DayOfMonth != nil {
 			day = *pos.DayOfMonth
 		}
-		current := time.Date(posStart.Year(), posStart.Month(), 1, 0, 0, 0, 0, time.UTC)
+		month := posStart.Month()
+		if pos.MonthOfYear != nil {
+			month = time.Month(*pos.MonthOfYear)
+		}
+		current := time.Date(posStart.Year(), month, 1, 0, 0, 0, 0, time.UTC)
 		for current.Before(effectiveEnd) {
 			dateInMonth := clampDayToMonth(current.Year(), current.Month(), day)
 			if !dateInMonth.Before(posStart) && !dateInMonth.Before(start) && dateInMonth.Before(effectiveEnd) {
@@ -450,7 +461,11 @@ func generateOccurrences(pos models.Position, start, end time.Time) []time.Time 
 		if pos.DayOfMonth != nil {
 			day = *pos.DayOfMonth
 		}
-		current := time.Date(posStart.Year(), posStart.Month(), 1, 0, 0, 0, 0, time.UTC)
+		month := posStart.Month()
+		if pos.MonthOfYear != nil {
+			month = time.Month(*pos.MonthOfYear)
+		}
+		current := time.Date(posStart.Year(), month, 1, 0, 0, 0, 0, time.UTC)
 		for current.Before(effectiveEnd) {
 			dateInMonth := clampDayToMonth(current.Year(), current.Month(), day)
 			if !dateInMonth.Before(posStart) && !dateInMonth.Before(start) && dateInMonth.Before(effectiveEnd) {

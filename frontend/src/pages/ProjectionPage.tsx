@@ -344,6 +344,7 @@ export default function ProjectionPage() {
       startBalance: startBal,
       endBalance: endBal,
       change: endBal - startBal,
+      monthlyNetFlow: acc.monthlyNetFlow,
       min: balances.length > 0 ? Math.min(...balances) : 0,
       max: balances.length > 0 ? Math.max(...balances) : 0,
     };
@@ -352,6 +353,7 @@ export default function ProjectionPage() {
   const totalStart = summaryStats.reduce((s, a) => s + a.startBalance, 0);
   const totalEnd = summaryStats.reduce((s, a) => s + a.endBalance, 0);
   const totalChange = totalEnd - totalStart;
+  const totalMonthlyNetFlow = summaryStats.reduce((s, a) => s + a.monthlyNetFlow, 0);
 
   // Determine a good tick interval for X axis
   const tickInterval = chartData.length > 60 ? Math.floor(chartData.length / 12) : chartData.length > 30 ? Math.floor(chartData.length / 8) : undefined;
@@ -853,6 +855,7 @@ export default function ProjectionPage() {
                       <th>Aktuell</th>
                       <th>Projiziert</th>
                       <th>Veränderung</th>
+                      <th>⌀ mtl. Netto</th>
                       <th>Min</th>
                       <th>Max</th>
                     </tr>
@@ -867,6 +870,10 @@ export default function ProjectionPage() {
                           {s.change >= 0 ? "+" : ""}
                           {formatCurrency(s.change)} €
                         </td>
+                        <td className={`amount ${s.monthlyNetFlow >= 0 ? "amount-positive" : "amount-negative"}`}>
+                          {s.monthlyNetFlow >= 0 ? "+" : ""}
+                          {formatCurrency(s.monthlyNetFlow)} €
+                        </td>
                         <td className="amount">{formatCurrency(s.min)} €</td>
                         <td className="amount">{formatCurrency(s.max)} €</td>
                       </tr>
@@ -879,6 +886,10 @@ export default function ProjectionPage() {
                         <td className={`amount ${totalChange >= 0 ? "amount-positive" : "amount-negative"}`}>
                           {totalChange >= 0 ? "+" : ""}
                           {formatCurrency(totalChange)} €
+                        </td>
+                        <td className={`amount ${totalMonthlyNetFlow >= 0 ? "amount-positive" : "amount-negative"}`}>
+                          {totalMonthlyNetFlow >= 0 ? "+" : ""}
+                          {formatCurrency(totalMonthlyNetFlow)} €
                         </td>
                         <td></td>
                         <td></td>
