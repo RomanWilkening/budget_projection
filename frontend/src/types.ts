@@ -155,3 +155,9 @@ export interface RecurringAnalysis {
 }
 
 export type Settings = Record<string, string>;
+
+export interface ScenarioModification {
+  modifiedPositions: Position[];
+  removedPositionIds: number[];
+  newPositions: Partial<Position>[];
+}

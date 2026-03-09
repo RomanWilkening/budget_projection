@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -10,8 +10,8 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import { getProjection, getPersons, getAccounts, getDepots } from "../api";
-import type { ProjectionResponse, Person, Account, Depot } from "../types";
+import { getProjection, getProjectionWithScenario, getPersons, getAccounts, getDepots, getPositions } from "../api";
+import type { ProjectionResponse, Person, Account, Depot, Position, ScenarioModification } from "../types";
 
 const COLORS = [
   "#3182ce",
@@ -33,6 +33,22 @@ const MONTH_OPTIONS = [
   { value: 60, label: "5 Jahre" },
 ];
 
+const FREQUENCY_LABELS: Record<string, string> = {
+  daily: "Täglich",
+  weekly: "Wöchentlich",
+  biweekly: "Alle 2 Wochen",
+  monthly: "Monatlich",
+  quarterly: "Quartalsweise",
+  semi_annually: "Halbjährlich",
+  annually: "Jährlich",
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  income: "Einnahme",
+  expense: "Ausgabe",
+  transfer: "Umbuchung",
+};
+
 function formatCurrency(value: number): string {
   return value.toLocaleString("de-DE", {
     minimumFractionDigits: 2,
@@ -45,6 +61,36 @@ function formatDateLabel(dateStr: string): string {
   return d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
 
+interface NewPositionForm {
+  name: string;
+  type: "income" | "expense" | "transfer";
+  amount: string;
+  accountId: string;
+  sourceAccountId: string;
+  targetAccountId: string;
+  frequencyType: string;
+  interval: string;
+  dayOfMonth: string;
+  businessDayRule: string;
+  startDate: string;
+  endDate: string;
+}
+
+const emptyNewPosition: NewPositionForm = {
+  name: "",
+  type: "expense",
+  amount: "",
+  accountId: "",
+  sourceAccountId: "",
+  targetAccountId: "",
+  frequencyType: "monthly",
+  interval: "1",
+  dayOfMonth: "1",
+  businessDayRule: "exact",
+  startDate: new Date().toISOString().split("T")[0],
+  endDate: "",
+};
+
 export default function ProjectionPage() {
   const [months, setMonths] = useState(6);
   const [data, setData] = useState<ProjectionResponse | null>(null);
@@ -53,19 +99,48 @@ export default function ProjectionPage() {
   const [persons, setPersons] = useState<Person[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
+  const [positions, setPositions] = useState<Position[]>([]);
   const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set());
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
   const [selectedDepotIds, setSelectedDepotIds] = useState<Set<number>>(new Set());
 
+  // Scenario state
+  const [scenarioOpen, setScenarioOpen] = useState(false);
+  const [removedPositionIds, setRemovedPositionIds] = useState<Set<number>>(new Set());
+  const [modifiedAmounts, setModifiedAmounts] = useState<Map<number, number>>(new Map());
+  const [newPositions, setNewPositions] = useState<Partial<Position>[]>([]);
+  const [showNewPosForm, setShowNewPosForm] = useState(false);
+  const [newPosForm, setNewPosForm] = useState<NewPositionForm>({ ...emptyNewPosition });
+
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  // Fetch persons, accounts, and depots once on mount
+  const hasScenarioChanges = removedPositionIds.size > 0 || modifiedAmounts.size > 0 || newPositions.length > 0;
+
+  // Build the scenario modification object
+  const scenarioMod = useMemo((): ScenarioModification | null => {
+    if (!hasScenarioChanges) return null;
+    const modified: Position[] = [];
+    for (const [id, amount] of modifiedAmounts) {
+      const orig = positions.find((p) => p.id === id);
+      if (orig) {
+        modified.push({ ...orig, amount });
+      }
+    }
+    return {
+      modifiedPositions: modified,
+      removedPositionIds: Array.from(removedPositionIds),
+      newPositions,
+    };
+  }, [hasScenarioChanges, modifiedAmounts, removedPositionIds, newPositions, positions]);
+
+  // Fetch persons, accounts, depots, and positions once on mount
   useEffect(() => {
-    Promise.all([getPersons(), getAccounts(), getDepots()])
-      .then(([p, a, d]) => {
+    Promise.all([getPersons(), getAccounts(), getDepots(), getPositions()])
+      .then(([p, a, d, pos]) => {
         setPersons(p);
         setAccounts(a);
         setDepots(d);
+        setPositions(pos);
         setSelectedPersonIds(new Set(p.map((pr) => pr.id)));
         setSelectedAccountIds(new Set(a.filter((ac) => ac.showInProjection).map((ac) => ac.id)));
         setSelectedDepotIds(new Set(d.map((dp) => dp.id)));
@@ -73,10 +148,17 @@ export default function ProjectionPage() {
       .catch(() => { /* filter panel will simply not render */ });
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Fetch projection data (with or without scenario)
+  const fetchProjection = useCallback(() => {
     setLoading(true);
-    getProjection({ months, startDate: today })
+    setError("");
+
+    const promise = scenarioMod
+      ? getProjectionWithScenario({ months, startDate: today, scenario: scenarioMod })
+      : getProjection({ months, startDate: today });
+
+    let cancelled = false;
+    promise
       .then((result) => {
         if (!cancelled) setData(result);
       })
@@ -87,7 +169,83 @@ export default function ProjectionPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [months, today]);
+  }, [months, today, scenarioMod]);
+
+  useEffect(() => {
+    return fetchProjection();
+  }, [fetchProjection]);
+
+  // Helper to get account name by ID
+  const getAccountName = useCallback((id: number | undefined) => {
+    if (!id) return "–";
+    return accounts.find((a) => a.id === id)?.name ?? `Konto #${id}`;
+  }, [accounts]);
+
+  // Scenario: toggle position removal
+  const toggleRemovePosition = (id: number) => {
+    setRemovedPositionIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Scenario: modify position amount
+  const setPositionAmount = (id: number, amount: number) => {
+    setModifiedAmounts((prev) => {
+      const next = new Map(prev);
+      const orig = positions.find((p) => p.id === id);
+      if (orig && orig.amount === amount) {
+        next.delete(id);
+      } else {
+        next.set(id, amount);
+      }
+      return next;
+    });
+  };
+
+  // Scenario: add new virtual position from form
+  const handleAddNewPosition = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseFloat(newPosForm.amount);
+    if (!newPosForm.name || isNaN(amount) || amount <= 0) return;
+
+    const pos: Partial<Position> = {
+      name: newPosForm.name,
+      type: newPosForm.type,
+      amount,
+      frequencyType: newPosForm.frequencyType as Position["frequencyType"],
+      interval: parseInt(newPosForm.interval) || 1,
+      dayOfMonth: newPosForm.dayOfMonth ? parseInt(newPosForm.dayOfMonth) : undefined,
+      businessDayRule: newPosForm.businessDayRule as Position["businessDayRule"],
+      startDate: newPosForm.startDate,
+      endDate: newPosForm.endDate || undefined,
+    };
+
+    if (newPosForm.type === "transfer") {
+      if (newPosForm.sourceAccountId) pos.sourceAccountId = parseInt(newPosForm.sourceAccountId);
+      if (newPosForm.targetAccountId) pos.targetAccountId = parseInt(newPosForm.targetAccountId);
+    } else {
+      if (newPosForm.accountId) pos.accountId = parseInt(newPosForm.accountId);
+    }
+
+    setNewPositions((prev) => [...prev, pos]);
+    setNewPosForm({ ...emptyNewPosition });
+    setShowNewPosForm(false);
+  };
+
+  // Scenario: remove a virtual new position
+  const removeNewPosition = (index: number) => {
+    setNewPositions((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  // Scenario: reset all changes
+  const resetScenario = () => {
+    setRemovedPositionIds(new Set());
+    setModifiedAmounts(new Map());
+    setNewPositions([]);
+  };
 
   // Build a map of account ID -> owner person IDs using the accounts data
   const accountOwnerMap = useMemo(() => {
@@ -279,6 +437,313 @@ export default function ProjectionPage() {
               </div>
             </div>
           )}
+
+          {/* Scenario Panel */}
+          <div className={`card scenario-card ${hasScenarioChanges ? "scenario-active" : ""}`}>
+            <div className="scenario-header" onClick={() => setScenarioOpen(!scenarioOpen)}>
+              <h3>
+                🔬 Szenario
+                {hasScenarioChanges && <span className="scenario-badge">Aktiv</span>}
+              </h3>
+              <span className="scenario-toggle">{scenarioOpen ? "▲" : "▼"}</span>
+            </div>
+
+            {scenarioOpen && (
+              <div className="scenario-content">
+                <p className="scenario-hint">
+                  Passen Sie Positionen temporär an, um verschiedene Szenarien zu simulieren.
+                  Änderungen werden nicht gespeichert.
+                </p>
+
+                {hasScenarioChanges && (
+                  <div className="scenario-actions">
+                    <button className="btn btn-sm btn-secondary" onClick={resetScenario}>
+                      Szenario zurücksetzen
+                    </button>
+                  </div>
+                )}
+
+                {/* Existing positions */}
+                {positions.length > 0 && (
+                  <div className="scenario-positions">
+                    <table className="scenario-table">
+                      <thead>
+                        <tr>
+                          <th>Aktiv</th>
+                          <th>Position</th>
+                          <th>Typ</th>
+                          <th>Konto</th>
+                          <th>Frequenz</th>
+                          <th>Betrag (€)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {positions.map((pos) => {
+                          const isRemoved = removedPositionIds.has(pos.id);
+                          const modAmount = modifiedAmounts.get(pos.id);
+                          const isModified = modAmount !== undefined;
+                          const accountName = pos.type === "transfer"
+                            ? `${getAccountName(pos.sourceAccountId)} → ${getAccountName(pos.targetAccountId)}`
+                            : getAccountName(pos.accountId);
+                          return (
+                            <tr key={pos.id} className={isRemoved ? "scenario-row-removed" : isModified ? "scenario-row-modified" : ""}>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={!isRemoved}
+                                  onChange={() => toggleRemovePosition(pos.id)}
+                                />
+                              </td>
+                              <td className={isRemoved ? "text-strikethrough" : ""}>{pos.name}</td>
+                              <td>
+                                <span className={`type-badge type-${pos.type}`}>
+                                  {TYPE_LABELS[pos.type] ?? pos.type}
+                                </span>
+                              </td>
+                              <td>{accountName}</td>
+                              <td>{FREQUENCY_LABELS[pos.frequencyType] ?? pos.frequencyType}</td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="scenario-amount-input"
+                                  value={isModified ? modAmount : pos.amount}
+                                  step="0.01"
+                                  min="0"
+                                  disabled={isRemoved}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    if (!isNaN(val)) setPositionAmount(pos.id, val);
+                                  }}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* New virtual positions */}
+                {newPositions.length > 0 && (
+                  <div className="scenario-new-positions">
+                    <h4>Neue Positionen (virtuell)</h4>
+                    <table className="scenario-table">
+                      <thead>
+                        <tr>
+                          <th></th>
+                          <th>Position</th>
+                          <th>Typ</th>
+                          <th>Konto</th>
+                          <th>Frequenz</th>
+                          <th>Betrag (€)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {newPositions.map((pos, i) => {
+                          const accountName = pos.type === "transfer"
+                            ? `${getAccountName(pos.sourceAccountId)} → ${getAccountName(pos.targetAccountId)}`
+                            : getAccountName(pos.accountId);
+                          return (
+                            <tr key={i} className="scenario-row-new">
+                              <td>
+                                <button
+                                  className="btn btn-sm btn-icon btn-danger"
+                                  onClick={() => removeNewPosition(i)}
+                                  title="Entfernen"
+                                >
+                                  ✕
+                                </button>
+                              </td>
+                              <td>{pos.name}</td>
+                              <td>
+                                <span className={`type-badge type-${pos.type}`}>
+                                  {TYPE_LABELS[pos.type ?? ""] ?? pos.type}
+                                </span>
+                              </td>
+                              <td>{accountName}</td>
+                              <td>{FREQUENCY_LABELS[pos.frequencyType ?? ""] ?? pos.frequencyType}</td>
+                              <td className="amount">{formatCurrency(pos.amount ?? 0)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Add new position form */}
+                {showNewPosForm ? (
+                  <div className="scenario-new-form">
+                    <h4>Neue virtuelle Position</h4>
+                    <form onSubmit={handleAddNewPosition}>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label>Name</label>
+                          <input
+                            type="text"
+                            value={newPosForm.name}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, name: e.target.value })}
+                            required
+                            placeholder="Positionsname"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Typ</label>
+                          <select
+                            value={newPosForm.type}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, type: e.target.value as NewPositionForm["type"] })}
+                          >
+                            <option value="income">Einnahme</option>
+                            <option value="expense">Ausgabe</option>
+                            <option value="transfer">Umbuchung</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label>Betrag (€)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={newPosForm.amount}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, amount: e.target.value })}
+                            required
+                          />
+                        </div>
+                        {newPosForm.type === "transfer" ? (
+                          <>
+                            <div className="form-group">
+                              <label>Quellkonto</label>
+                              <select
+                                value={newPosForm.sourceAccountId}
+                                onChange={(e) => setNewPosForm({ ...newPosForm, sourceAccountId: e.target.value })}
+                              >
+                                <option value="">– wählen –</option>
+                                {accounts.map((a) => (
+                                  <option key={a.id} value={a.id}>{a.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="form-group">
+                              <label>Zielkonto</label>
+                              <select
+                                value={newPosForm.targetAccountId}
+                                onChange={(e) => setNewPosForm({ ...newPosForm, targetAccountId: e.target.value })}
+                              >
+                                <option value="">– wählen –</option>
+                                {accounts.map((a) => (
+                                  <option key={a.id} value={a.id}>{a.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="form-group">
+                            <label>Konto</label>
+                            <select
+                              value={newPosForm.accountId}
+                              onChange={(e) => setNewPosForm({ ...newPosForm, accountId: e.target.value })}
+                            >
+                              <option value="">– wählen –</option>
+                              {accounts.map((a) => (
+                                <option key={a.id} value={a.id}>{a.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label>Frequenz</label>
+                          <select
+                            value={newPosForm.frequencyType}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, frequencyType: e.target.value })}
+                          >
+                            <option value="daily">Täglich</option>
+                            <option value="weekly">Wöchentlich</option>
+                            <option value="biweekly">Alle 2 Wochen</option>
+                            <option value="monthly">Monatlich</option>
+                            <option value="quarterly">Quartalsweise</option>
+                            <option value="semi_annually">Halbjährlich</option>
+                            <option value="annually">Jährlich</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label>Intervall</label>
+                          <input
+                            type="number"
+                            min="1"
+                            value={newPosForm.interval}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, interval: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label>Tag im Monat</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="31"
+                            value={newPosForm.dayOfMonth}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, dayOfMonth: e.target.value })}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Geschäftstag-Regel</label>
+                          <select
+                            value={newPosForm.businessDayRule}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, businessDayRule: e.target.value })}
+                          >
+                            <option value="exact">Exakt</option>
+                            <option value="last_business_day_before">Letzter Geschäftstag davor</option>
+                            <option value="first_business_day_after">Erster Geschäftstag danach</option>
+                            <option value="last_business_day_of_month">Letzter Geschäftstag im Monat</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="form-row">
+                        <div className="form-group">
+                          <label>Startdatum</label>
+                          <input
+                            type="date"
+                            value={newPosForm.startDate}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, startDate: e.target.value })}
+                            required
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Enddatum (optional)</label>
+                          <input
+                            type="date"
+                            value={newPosForm.endDate}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, endDate: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <div className="form-actions">
+                        <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowNewPosForm(false)}>
+                          Abbrechen
+                        </button>
+                        <button type="submit" className="btn btn-sm btn-primary">
+                          Hinzufügen
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-sm btn-success scenario-add-btn"
+                    onClick={() => setShowNewPosForm(true)}
+                  >
+                    + Neue Position hinzufügen
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Summary Cards */}
           <div className="dashboard-grid">
