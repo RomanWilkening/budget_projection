@@ -98,6 +98,7 @@ func setupRouter() *gin.Engine {
 
 		// Projection
 		api.GET("/projection", handlers.GetProjection)
+		api.POST("/projection", handlers.PostProjectionScenario)
 
 		// Banking Bridge
 		bridge := api.Group("/banking-bridge")

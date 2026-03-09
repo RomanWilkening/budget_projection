@@ -1,4 +1,4 @@
-import type { Person, Account, Position, PositionSeparator, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings, Depot } from "./types";
+import type { Person, Account, Position, PositionSeparator, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings, Depot, ScenarioModification } from "./types";
 
 const BASE = "/api";
 
@@ -78,6 +78,22 @@ export const getProjection = (params: {
   if (params.startDate) query.set("startDate", params.startDate);
   if (params.granularity) query.set("granularity", params.granularity);
   return request<ProjectionResponse>(`${BASE}/projection?${query.toString()}`);
+};
+
+export const getProjectionWithScenario = (params: {
+  months?: number;
+  startDate?: string;
+  granularity?: string;
+  scenario: ScenarioModification;
+}) => {
+  const query = new URLSearchParams();
+  if (params.months) query.set("months", String(params.months));
+  if (params.startDate) query.set("startDate", params.startDate);
+  if (params.granularity) query.set("granularity", params.granularity);
+  return request<ProjectionResponse>(`${BASE}/projection?${query.toString()}`, {
+    method: "POST",
+    body: JSON.stringify(params.scenario),
+  });
 };
 
 // Banking Bridge

@@ -80,6 +80,7 @@ func setupRouter() *gin.Engine {
 			depots.PUT("", handlers.ReorderDepots)
 		}
 		api.GET("/projection", handlers.GetProjection)
+		api.POST("/projection", handlers.PostProjectionScenario)
 
 		bridge := api.Group("/banking-bridge")
 		{
@@ -1534,5 +1535,196 @@ func TestAccountShowInProjection(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &acc)
 	if acc.ShowInProjection == nil || *acc.ShowInProjection {
 		t.Fatal("Expected showInProjection to be false after update")
+	}
+}
+
+func TestProjectionScenario(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create account with balance 1000
+	accountData := map[string]interface{}{
+		"name":     "Girokonto",
+		"balance":  1000.0,
+		"currency": "EUR",
+	}
+	body, _ := json.Marshal(accountData)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create monthly income of 3000 starting 2026-01-01
+	accountID := uint(1)
+	posData := map[string]interface{}{
+		"name":            "Gehalt",
+		"type":            "income",
+		"amount":          3000.00,
+		"accountId":       accountID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      1,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var incomePos models.Position
+	json.Unmarshal(w.Body.Bytes(), &incomePos)
+
+	// Create monthly expense of 800 starting 2026-01-01
+	posData2 := map[string]interface{}{
+		"name":            "Miete",
+		"type":            "expense",
+		"amount":          800.00,
+		"accountId":       accountID,
+		"frequencyType":   "monthly",
+		"interval":        1,
+		"dayOfMonth":      1,
+		"businessDayRule": "exact",
+		"startDate":       "2026-01-01",
+	}
+	body, _ = json.Marshal(posData2)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var expensePos models.Position
+	json.Unmarshal(w.Body.Bytes(), &expensePos)
+
+	// Baseline: GET projection for 3 months
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/projection?months=3&startDate=2026-01-01&granularity=monthly", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	type dpResult struct {
+		Accounts []struct {
+			ID         uint   `json:"id"`
+			Name       string `json:"name"`
+			DataPoints []struct {
+				Date    string  `json:"date"`
+				Balance float64 `json:"balance"`
+			} `json:"dataPoints"`
+		} `json:"accounts"`
+	}
+	var baseline dpResult
+	json.Unmarshal(w.Body.Bytes(), &baseline)
+	// Day1: 1000 + 3000 - 800 = 3200
+	if baseline.Accounts[0].DataPoints[0].Balance != 3200.0 {
+		t.Fatalf("Baseline day1 expected 3200, got %.2f", baseline.Accounts[0].DataPoints[0].Balance)
+	}
+
+	// Scenario 1: Remove the expense
+	scenario1 := map[string]interface{}{
+		"removedPositionIds": []uint{expensePos.ID},
+	}
+	body, _ = json.Marshal(scenario1)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/projection?months=3&startDate=2026-01-01&granularity=monthly", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var scenario1Result dpResult
+	json.Unmarshal(w.Body.Bytes(), &scenario1Result)
+	// Day1: 1000 + 3000 = 4000 (expense removed)
+	if scenario1Result.Accounts[0].DataPoints[0].Balance != 4000.0 {
+		t.Fatalf("Scenario1 day1 expected 4000, got %.2f", scenario1Result.Accounts[0].DataPoints[0].Balance)
+	}
+
+	// Scenario 2: Modify the income amount to 5000
+	scenario2 := map[string]interface{}{
+		"modifiedPositions": []map[string]interface{}{
+			{
+				"id":              incomePos.ID,
+				"name":            "Gehalt",
+				"type":            "income",
+				"amount":          5000.00,
+				"accountId":       accountID,
+				"frequencyType":   "monthly",
+				"interval":        1,
+				"dayOfMonth":      1,
+				"businessDayRule": "exact",
+				"startDate":       "2026-01-01",
+			},
+		},
+	}
+	body, _ = json.Marshal(scenario2)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/projection?months=3&startDate=2026-01-01&granularity=monthly", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var scenario2Result dpResult
+	json.Unmarshal(w.Body.Bytes(), &scenario2Result)
+	// Day1: 1000 + 5000 - 800 = 5200 (income changed to 5000)
+	if scenario2Result.Accounts[0].DataPoints[0].Balance != 5200.0 {
+		t.Fatalf("Scenario2 day1 expected 5200, got %.2f", scenario2Result.Accounts[0].DataPoints[0].Balance)
+	}
+
+	// Scenario 3: Add a new virtual position (extra expense of 200)
+	scenario3 := map[string]interface{}{
+		"newPositions": []map[string]interface{}{
+			{
+				"name":            "Streaming",
+				"type":            "expense",
+				"amount":          200.00,
+				"accountId":       accountID,
+				"frequencyType":   "monthly",
+				"interval":        1,
+				"dayOfMonth":      1,
+				"businessDayRule": "exact",
+				"startDate":       "2026-01-01",
+			},
+		},
+	}
+	body, _ = json.Marshal(scenario3)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/projection?months=3&startDate=2026-01-01&granularity=monthly", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var scenario3Result dpResult
+	json.Unmarshal(w.Body.Bytes(), &scenario3Result)
+	// Day1: 1000 + 3000 - 800 - 200 = 3000 (new position added)
+	if scenario3Result.Accounts[0].DataPoints[0].Balance != 3000.0 {
+		t.Fatalf("Scenario3 day1 expected 3000, got %.2f", scenario3Result.Accounts[0].DataPoints[0].Balance)
+	}
+
+	// Verify original data unchanged: GET projection should still give 3200
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("GET", "/api/projection?months=3&startDate=2026-01-01&granularity=monthly", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var afterScenario dpResult
+	json.Unmarshal(w.Body.Bytes(), &afterScenario)
+	if afterScenario.Accounts[0].DataPoints[0].Balance != 3200.0 {
+		t.Fatalf("After scenario, baseline should still be 3200, got %.2f", afterScenario.Accounts[0].DataPoints[0].Balance)
 	}
 }
