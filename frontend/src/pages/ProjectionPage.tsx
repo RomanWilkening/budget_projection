@@ -270,7 +270,7 @@ export default function ProjectionPage() {
                             checked={selectedDepotIds.has(d.id)}
                             onChange={() => toggleDepot(d.id)}
                           />
-                          {d.name} ({d.interestRate}% p.a.)
+                          {d.name} ({d.interestRate.toFixed(2)}% p.a.)
                         </label>
                       ))}
                     </div>
