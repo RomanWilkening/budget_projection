@@ -443,7 +443,11 @@ func generateOccurrences(pos models.Position, start, end time.Time) []time.Time 
 		if pos.DayOfMonth != nil {
 			day = *pos.DayOfMonth
 		}
-		current := time.Date(posStart.Year(), posStart.Month(), 1, 0, 0, 0, 0, time.UTC)
+		month := posStart.Month()
+		if pos.MonthOfYear != nil {
+			month = time.Month(*pos.MonthOfYear)
+		}
+		current := time.Date(posStart.Year(), month, 1, 0, 0, 0, 0, time.UTC)
 		for current.Before(effectiveEnd) {
 			dateInMonth := clampDayToMonth(current.Year(), current.Month(), day)
 			if !dateInMonth.Before(posStart) && !dateInMonth.Before(start) && dateInMonth.Before(effectiveEnd) {
@@ -457,7 +461,11 @@ func generateOccurrences(pos models.Position, start, end time.Time) []time.Time 
 		if pos.DayOfMonth != nil {
 			day = *pos.DayOfMonth
 		}
-		current := time.Date(posStart.Year(), posStart.Month(), 1, 0, 0, 0, 0, time.UTC)
+		month := posStart.Month()
+		if pos.MonthOfYear != nil {
+			month = time.Month(*pos.MonthOfYear)
+		}
+		current := time.Date(posStart.Year(), month, 1, 0, 0, 0, 0, time.UTC)
 		for current.Before(effectiveEnd) {
 			dateInMonth := clampDayToMonth(current.Year(), current.Month(), day)
 			if !dateInMonth.Before(posStart) && !dateInMonth.Before(start) && dateInMonth.Before(effectiveEnd) {

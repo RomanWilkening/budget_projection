@@ -152,7 +152,7 @@ type Position struct {
 	FrequencyType   FrequencyType   `json:"frequencyType" gorm:"not null"`   // daily, weekly, monthly, etc.
 	Interval        int             `json:"interval" gorm:"default:1"`       // every N periods
 	DayOfMonth      *int            `json:"dayOfMonth"`                      // 1-31, which day of month
-	MonthOfYear     *int            `json:"monthOfYear"`                     // 1-12, for annual frequencies
+	MonthOfYear     *int            `json:"monthOfYear"`                     // 1-12, starting month for quarterly/semi-annual/annual
 	DayOfWeek       *int            `json:"dayOfWeek"`                       // 0=Sun..6=Sat, for weekly
 	BusinessDayRule BusinessDayRule `json:"businessDayRule" gorm:"default:exact"` // how to handle non-business days
 
