@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent } from "react";
 import type { Depot, Account } from "../types";
 import {
   getDepots,
@@ -6,6 +6,7 @@ import {
   updateDepot,
   deleteDepot,
   getAccounts,
+  reorderDepots,
 } from "../api";
 
 interface FormState {
@@ -32,6 +33,11 @@ export default function DepotsPage() {
   const [editing, setEditing] = useState<Depot | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [formError, setFormError] = useState("");
+
+  // Drag & drop state
+  const [dragItem, setDragItem] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const dragCounter = useRef(0);
 
   const load = () => {
     setLoading(true);
@@ -124,6 +130,66 @@ export default function DepotsPage() {
     return d.accounts.reduce((sum, a) => sum + a.balance, 0);
   };
 
+  // Drag & drop handlers
+  const handleDragStart = (e: React.DragEvent, id: number) => {
+    setDragItem(id);
+    e.dataTransfer.effectAllowed = "move";
+    const target = e.currentTarget as HTMLElement;
+    target.classList.add("dragging");
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    const target = e.currentTarget as HTMLElement;
+    target.classList.remove("dragging");
+    setDragItem(null);
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+  };
+
+  const handleDragEnter = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    dragCounter.current++;
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    dragCounter.current--;
+    if (dragCounter.current <= 0) {
+      setDragOverIndex(null);
+      dragCounter.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+    dragCounter.current = 0;
+
+    if (dragItem === null) return;
+
+    const dragIndex = depots.findIndex((d) => d.id === dragItem);
+    if (dragIndex === dropIndex || dragIndex === -1) return;
+
+    const newItems = [...depots];
+    const [moved] = newItems.splice(dragIndex, 1);
+    newItems.splice(dropIndex, 0, moved);
+
+    setDepots(newItems);
+    setDragItem(null);
+
+    try {
+      await reorderDepots(newItems.map((d) => d.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Fehler beim Sortieren");
+      load();
+    }
+  };
+
   return (
     <>
       <div className="page-header">
@@ -151,6 +217,7 @@ export default function DepotsPage() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 40 }}></th>
                 <th>Name</th>
                 <th>Zinssatz (p.a.)</th>
                 <th>Konten</th>
@@ -159,8 +226,19 @@ export default function DepotsPage() {
               </tr>
             </thead>
             <tbody>
-              {depots.map((d) => (
-                <tr key={d.id}>
+              {depots.map((d, index) => (
+                <tr
+                  key={d.id}
+                  className={dragOverIndex === index ? "drag-over" : ""}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, d.id)}
+                  onDragEnd={handleDragEnd}
+                  onDragEnter={(e) => handleDragEnter(e, index)}
+                  onDragLeave={handleDragLeave}
+                  onDragOver={handleDragOver}
+                  onDrop={(e) => handleDrop(e, index)}
+                >
+                  <td className="drag-handle">⠿</td>
                   <td>{d.name}</td>
                   <td>{d.interestRate.toFixed(2)} %</td>
                   <td>

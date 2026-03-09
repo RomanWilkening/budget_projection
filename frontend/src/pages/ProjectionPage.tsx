@@ -67,7 +67,7 @@ export default function ProjectionPage() {
         setAccounts(a);
         setDepots(d);
         setSelectedPersonIds(new Set(p.map((pr) => pr.id)));
-        setSelectedAccountIds(new Set(a.map((ac) => ac.id)));
+        setSelectedAccountIds(new Set(a.filter((ac) => ac.showInProjection).map((ac) => ac.id)));
         setSelectedDepotIds(new Set(d.map((dp) => dp.id)));
       })
       .catch(() => { /* filter panel will simply not render */ });

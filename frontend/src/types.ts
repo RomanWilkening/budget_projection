@@ -1,6 +1,7 @@
 export interface Person {
   id: number;
   name: string;
+  sortOrder: number;
   accounts?: Account[];
   createdAt: string;
   updatedAt: string;
@@ -11,6 +12,8 @@ export interface Account {
   name: string;
   balance: number;
   currency: string;
+  sortOrder: number;
+  showInProjection: boolean;
   bankingBridgeAccountId?: number | null;
   owners?: Person[];
   createdAt: string;
@@ -88,6 +91,7 @@ export interface Depot {
   id: number;
   name: string;
   interestRate: number;
+  sortOrder: number;
   accounts?: Account[];
   createdAt: string;
   updatedAt: string;

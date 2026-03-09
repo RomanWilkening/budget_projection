@@ -24,16 +24,20 @@ export const updatePerson = (id: number, data: { name: string }) =>
   request<Person>(`${BASE}/persons/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deletePerson = (id: number) =>
   request<void>(`${BASE}/persons/${id}`, { method: "DELETE" });
+export const reorderPersons = (ids: number[]) =>
+  request<void>(`${BASE}/persons`, { method: "PUT", body: JSON.stringify(ids) });
 
 // Accounts
 export const getAccounts = () => request<Account[]>(`${BASE}/accounts`);
 export const getAccount = (id: number) => request<Account>(`${BASE}/accounts/${id}`);
-export const createAccount = (data: { name: string; balance: number; currency: string }) =>
+export const createAccount = (data: { name: string; balance: number; currency: string; showInProjection?: boolean }) =>
   request<Account>(`${BASE}/accounts`, { method: "POST", body: JSON.stringify(data) });
-export const updateAccount = (id: number, data: { name: string; balance: number; currency: string }) =>
+export const updateAccount = (id: number, data: { name: string; balance: number; currency: string; showInProjection?: boolean }) =>
   request<Account>(`${BASE}/accounts/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deleteAccount = (id: number) =>
   request<void>(`${BASE}/accounts/${id}`, { method: "DELETE" });
+export const reorderAccounts = (ids: number[]) =>
+  request<void>(`${BASE}/accounts`, { method: "PUT", body: JSON.stringify(ids) });
 export const addAccountOwner = (accountId: number, personId: number) =>
   request<void>(`${BASE}/accounts/${accountId}/owners`, {
     method: "POST",
@@ -116,3 +120,5 @@ export const updateDepot = (id: number, data: { name: string; interestRate: numb
   request<Depot>(`${BASE}/depots/${id}`, { method: "PUT", body: JSON.stringify(data) });
 export const deleteDepot = (id: number) =>
   request<void>(`${BASE}/depots/${id}`, { method: "DELETE" });
+export const reorderDepots = (ids: number[]) =>
+  request<void>(`${BASE}/depots`, { method: "PUT", body: JSON.stringify(ids) });
