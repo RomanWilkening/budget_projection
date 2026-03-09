@@ -1288,3 +1288,59 @@ func TestDepotProjectionWithInterest(t *testing.T) {
 		t.Fatalf("Expected interest roughly around 1000, got %.2f", interest)
 	}
 }
+
+func TestDepotWithMixedBankingBridgeAccounts(t *testing.T) {
+	setupTestDB(t)
+	router := setupRouter()
+
+	// Create two accounts: one without bankingBridgeAccountId (nil) and one with it set.
+	// This reproduces the bug where GORM emitted DEFAULT for nil pointer fields
+	// in SQLite when upserting via many2many associations.
+	acc1 := map[string]interface{}{
+		"name": "Konto ohne Bridge", "balance": 1000.0, "currency": "EUR",
+	}
+	body, _ := json.Marshal(acc1)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	acc2 := map[string]interface{}{
+		"name": "Konto mit Bridge", "balance": 2000.0, "currency": "EUR",
+		"bankingBridgeAccountId": 42,
+	}
+	body, _ = json.Marshal(acc2)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Create depot linking both accounts — this previously failed with
+	// 'near "DEFAULT": syntax error' on SQLite
+	depotData := map[string]interface{}{
+		"name":         "Mixed Depot",
+		"interestRate": 3.0,
+		"accountIds":   []uint{1, 2},
+	}
+	body, _ = json.Marshal(depotData)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/depots", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var depot models.Depot
+	json.Unmarshal(w.Body.Bytes(), &depot)
+	if len(depot.Accounts) != 2 {
+		t.Fatalf("Expected 2 accounts, got %d", len(depot.Accounts))
+	}
+}

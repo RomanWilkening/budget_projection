@@ -93,7 +93,7 @@ type Account struct {
 	Name                    string         `json:"name" gorm:"not null"`
 	Balance                 float64        `json:"balance" gorm:"default:0"`
 	Currency                string         `json:"currency" gorm:"default:EUR"`
-	BankingBridgeAccountID  *int           `json:"bankingBridgeAccountId,omitempty" gorm:"default:null"`
+	BankingBridgeAccountID  *int           `json:"bankingBridgeAccountId,omitempty"`
 	Owners                  []Person       `json:"owners,omitempty" gorm:"many2many:person_accounts;"`
 	CreatedAt               time.Time      `json:"createdAt"`
 	UpdatedAt               time.Time      `json:"updatedAt"`
