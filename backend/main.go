@@ -83,6 +83,16 @@ func setupRouter() *gin.Engine {
 			separators.DELETE("/:id", handlers.DeleteSeparator)
 		}
 
+		// Depots
+		depots := api.Group("/depots")
+		{
+			depots.GET("", handlers.ListDepots)
+			depots.GET("/:id", handlers.GetDepot)
+			depots.POST("", handlers.CreateDepot)
+			depots.PUT("/:id", handlers.UpdateDepot)
+			depots.DELETE("/:id", handlers.DeleteDepot)
+		}
+
 		// Projection
 		api.GET("/projection", handlers.GetProjection)
 

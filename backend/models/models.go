@@ -172,3 +172,15 @@ type PositionSeparator struct {
 	UpdatedAt time.Time      `json:"updatedAt"`
 	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
 }
+
+// Depot represents a virtual investment portfolio that aggregates multiple accounts
+// and applies a configurable annual interest rate for projection purposes.
+type Depot struct {
+	ID           uint           `json:"id" gorm:"primaryKey"`
+	Name         string         `json:"name" gorm:"not null"`
+	InterestRate float64        `json:"interestRate" gorm:"default:0"` // annual interest rate in percent (e.g. 5.0 = 5%)
+	Accounts     []Account      `json:"accounts,omitempty" gorm:"many2many:depot_accounts;"`
+	CreatedAt    time.Time      `json:"createdAt"`
+	UpdatedAt    time.Time      `json:"updatedAt"`
+	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index"`
+}
