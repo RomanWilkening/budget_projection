@@ -7,6 +7,7 @@ import PositionsPage from "./pages/PositionsPage";
 import ProjectionPage from "./pages/ProjectionPage";
 import BankingBridgePage from "./pages/BankingBridgePage";
 import SettingsPage from "./pages/SettingsPage";
+import DepotsPage from "./pages/DepotsPage";
 
 function App() {
   return (
@@ -29,6 +30,9 @@ function App() {
           <NavLink to="/konten">
             <span className="nav-icon">🏦</span> Konten
           </NavLink>
+          <NavLink to="/depots">
+            <span className="nav-icon">📊</span> Depots
+          </NavLink>
           <NavLink to="/positionen">
             <span className="nav-icon">📋</span> Positionen
           </NavLink>
@@ -46,6 +50,7 @@ function App() {
           <Route path="/projektion" element={<ProjectionPage />} />
           <Route path="/personen" element={<PersonsPage />} />
           <Route path="/konten" element={<AccountsPage />} />
+          <Route path="/depots" element={<DepotsPage />} />
           <Route path="/positionen" element={<PositionsPage />} />
           <Route path="/banking-bridge" element={<BankingBridgePage />} />
           <Route path="/einstellungen" element={<SettingsPage />} />

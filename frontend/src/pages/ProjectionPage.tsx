@@ -10,8 +10,8 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import { getProjection, getPersons, getAccounts } from "../api";
-import type { ProjectionResponse, Person, Account } from "../types";
+import { getProjection, getPersons, getAccounts, getDepots } from "../api";
+import type { ProjectionResponse, Person, Account, Depot } from "../types";
 
 const COLORS = [
   "#3182ce",
@@ -52,19 +52,23 @@ export default function ProjectionPage() {
   const [error, setError] = useState("");
   const [persons, setPersons] = useState<Person[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [depots, setDepots] = useState<Depot[]>([]);
   const [selectedPersonIds, setSelectedPersonIds] = useState<Set<number>>(new Set());
   const [selectedAccountIds, setSelectedAccountIds] = useState<Set<number>>(new Set());
+  const [selectedDepotIds, setSelectedDepotIds] = useState<Set<number>>(new Set());
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  // Fetch persons and accounts once on mount
+  // Fetch persons, accounts, and depots once on mount
   useEffect(() => {
-    Promise.all([getPersons(), getAccounts()])
-      .then(([p, a]) => {
+    Promise.all([getPersons(), getAccounts(), getDepots()])
+      .then(([p, a, d]) => {
         setPersons(p);
         setAccounts(a);
+        setDepots(d);
         setSelectedPersonIds(new Set(p.map((pr) => pr.id)));
         setSelectedAccountIds(new Set(a.map((ac) => ac.id)));
+        setSelectedDepotIds(new Set(d.map((dp) => dp.id)));
       })
       .catch(() => { /* filter panel will simply not render */ });
   }, []);
@@ -129,9 +133,23 @@ export default function ProjectionPage() {
     });
   };
 
+  const toggleDepot = (id: number) => {
+    setSelectedDepotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   // Filtered accounts from projection data
   const filteredAccounts = data
     ? data.accounts.filter((acc) => visibleAccountIds.has(acc.id))
+    : [];
+
+  // Filtered depots from projection data
+  const filteredDepots = data?.depots
+    ? data.depots.filter((dp) => selectedDepotIds.has(dp.id))
     : [];
 
   // Build chart data: merge visible accounts into rows keyed by date
@@ -148,6 +166,11 @@ export default function ProjectionPage() {
           total += bal;
         }
         row["Gesamt"] = total;
+        // Add depot lines
+        for (const dp of filteredDepots) {
+          const bal = dp.dataPoints[i]?.balance ?? 0;
+          row[`📊 ${dp.name}`] = bal;
+        }
         return row;
       })
     : [];
@@ -198,7 +221,7 @@ export default function ProjectionPage() {
       {!loading && data && (
         <>
           {/* Filter Panel */}
-          {(persons.length > 0 || accounts.length > 0) && (
+          {(persons.length > 0 || accounts.length > 0 || depots.length > 0) && (
             <div className="card projection-filter-card">
               <h3>Filter</h3>
               <div className="projection-filter-groups">
@@ -231,6 +254,23 @@ export default function ProjectionPage() {
                             onChange={() => toggleAccount(a.id)}
                           />
                           {a.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {depots.length > 0 && (
+                  <div className="projection-filter-group">
+                    <span className="projection-filter-label">Depots</span>
+                    <div className="projection-filter-options">
+                      {depots.map((d) => (
+                        <label key={d.id} className="projection-filter-option">
+                          <input
+                            type="checkbox"
+                            checked={selectedDepotIds.has(d.id)}
+                            onChange={() => toggleDepot(d.id)}
+                          />
+                          {d.name} ({d.interestRate}% p.a.)
                         </label>
                       ))}
                     </div>
@@ -312,6 +352,18 @@ export default function ProjectionPage() {
                       activeDot={{ r: 4 }}
                     />
                   )}
+                  {filteredDepots.map((dp, i) => (
+                    <Line
+                      key={`depot-${dp.id}`}
+                      type="monotone"
+                      dataKey={`📊 ${dp.name}`}
+                      stroke={COLORS[(filteredAccounts.length + i) % COLORS.length]}
+                      strokeWidth={2}
+                      strokeDasharray="8 4"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -367,6 +419,45 @@ export default function ProjectionPage() {
                         <td></td>
                       </tr>
                     )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Depot Detail Table */}
+          {filteredDepots.length > 0 && (
+            <div className="card projection-table-card">
+              <h3>Depotübersicht</h3>
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Depot</th>
+                      <th>Zinssatz</th>
+                      <th>Aktuell</th>
+                      <th>Projiziert</th>
+                      <th>Veränderung</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDepots.map((dp) => {
+                      const startBal = dp.dataPoints[0]?.balance ?? 0;
+                      const endBal = dp.dataPoints[dp.dataPoints.length - 1]?.balance ?? 0;
+                      const change = endBal - startBal;
+                      return (
+                        <tr key={dp.id}>
+                          <td>📊 {dp.name}</td>
+                          <td>{dp.interestRate.toFixed(2)} % p.a.</td>
+                          <td className="amount">{formatCurrency(startBal)} €</td>
+                          <td className="amount">{formatCurrency(endBal)} €</td>
+                          <td className={`amount ${change >= 0 ? "amount-positive" : "amount-negative"}`}>
+                            {change >= 0 ? "+" : ""}
+                            {formatCurrency(change)} €
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

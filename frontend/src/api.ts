@@ -1,4 +1,4 @@
-import type { Person, Account, Position, PositionSeparator, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings } from "./types";
+import type { Person, Account, Position, PositionSeparator, ProjectionResponse, BridgeAccount, BridgeStatus, RecurringAnalysis, Settings, Depot } from "./types";
 
 const BASE = "/api";
 
@@ -106,3 +106,13 @@ export const getSettings = () =>
   request<Settings>(`${BASE}/settings`);
 export const updateSettings = (data: Settings) =>
   request<Settings>(`${BASE}/settings`, { method: "PUT", body: JSON.stringify(data) });
+
+// Depots
+export const getDepots = () => request<Depot[]>(`${BASE}/depots`);
+export const getDepot = (id: number) => request<Depot>(`${BASE}/depots/${id}`);
+export const createDepot = (data: { name: string; interestRate: number; accountIds: number[] }) =>
+  request<Depot>(`${BASE}/depots`, { method: "POST", body: JSON.stringify(data) });
+export const updateDepot = (id: number, data: { name: string; interestRate: number; accountIds: number[] }) =>
+  request<Depot>(`${BASE}/depots/${id}`, { method: "PUT", body: JSON.stringify(data) });
+export const deleteDepot = (id: number) =>
+  request<void>(`${BASE}/depots/${id}`, { method: "DELETE" });

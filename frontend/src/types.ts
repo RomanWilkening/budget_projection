@@ -80,7 +80,24 @@ export interface AccountProjection {
 
 export interface ProjectionResponse {
   accounts: AccountProjection[];
+  depots: DepotProjection[];
   totals: ProjectionDataPoint[];
+}
+
+export interface Depot {
+  id: number;
+  name: string;
+  interestRate: number;
+  accounts?: Account[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DepotProjection {
+  id: number;
+  name: string;
+  interestRate: number;
+  dataPoints: ProjectionDataPoint[];
 }
 
 export interface BridgeAccount {
