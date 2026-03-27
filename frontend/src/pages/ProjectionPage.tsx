@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import { getProjection, getProjectionWithScenario, getPersons, getAccounts, getDepots, getPositions } from "../api";
+import { getProjection, getProjectionWithScenario, getPersons, getAccounts, getDepots, getPositions, updatePosition, createPosition, deletePosition } from "../api";
 import type { ProjectionResponse, Person, Account, Depot, Position, ScenarioModification } from "../types";
 
 const COLORS = [
@@ -74,6 +74,7 @@ interface NewPositionForm {
   businessDayRule: string;
   startDate: string;
   endDate: string;
+  growthRate: string;
 }
 
 const emptyNewPosition: NewPositionForm = {
@@ -89,6 +90,7 @@ const emptyNewPosition: NewPositionForm = {
   businessDayRule: "exact",
   startDate: new Date().toISOString().split("T")[0],
   endDate: "",
+  growthRate: "0",
 };
 
 export default function ProjectionPage() {
@@ -109,22 +111,34 @@ export default function ProjectionPage() {
   const [scenarioOpen, setScenarioOpen] = useState(false);
   const [removedPositionIds, setRemovedPositionIds] = useState<Set<number>>(new Set());
   const [modifiedAmounts, setModifiedAmounts] = useState<Map<number, number>>(new Map());
+  const [modifiedGrowthRates, setModifiedGrowthRates] = useState<Map<number, number>>(new Map());
   const [newPositions, setNewPositions] = useState<Partial<Position>[]>([]);
   const [showNewPosForm, setShowNewPosForm] = useState(false);
   const [newPosForm, setNewPosForm] = useState<NewPositionForm>({ ...emptyNewPosition });
+  const [applyingScenario, setApplyingScenario] = useState(false);
+  // Applied scenario: only this drives the projection fetch (not the editing state)
+  const [appliedScenarioMod, setAppliedScenarioMod] = useState<ScenarioModification | null>(null);
+
+  // Inflation state
+  const [inflationRate, setInflationRate] = useState(0);
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  const hasScenarioChanges = removedPositionIds.size > 0 || modifiedAmounts.size > 0 || newPositions.length > 0;
+  const hasScenarioChanges = removedPositionIds.size > 0 || modifiedAmounts.size > 0 || modifiedGrowthRates.size > 0 || newPositions.length > 0;
 
-  // Build the scenario modification object
+  // Build the scenario modification object (represents current editing state)
   const scenarioMod = useMemo((): ScenarioModification | null => {
     if (!hasScenarioChanges) return null;
+    // Collect all position IDs that have any modification
+    const modifiedIds = new Set([...modifiedAmounts.keys(), ...modifiedGrowthRates.keys()]);
     const modified: Position[] = [];
-    for (const [id, amount] of modifiedAmounts) {
+    for (const id of modifiedIds) {
       const orig = positions.find((p) => p.id === id);
       if (orig) {
-        modified.push({ ...orig, amount });
+        const pos = { ...orig };
+        if (modifiedAmounts.has(id)) pos.amount = modifiedAmounts.get(id)!;
+        if (modifiedGrowthRates.has(id)) pos.growthRate = modifiedGrowthRates.get(id)!;
+        modified.push(pos);
       }
     }
     return {
@@ -132,7 +146,17 @@ export default function ProjectionPage() {
       removedPositionIds: Array.from(removedPositionIds),
       newPositions,
     };
-  }, [hasScenarioChanges, modifiedAmounts, removedPositionIds, newPositions, positions]);
+  }, [hasScenarioChanges, modifiedAmounts, modifiedGrowthRates, removedPositionIds, newPositions, positions]);
+
+  // Track whether editing state differs from last applied state
+  const hasUnappliedChanges = useMemo(() => {
+    return JSON.stringify(scenarioMod) !== JSON.stringify(appliedScenarioMod);
+  }, [scenarioMod, appliedScenarioMod]);
+
+  // Apply current scenario edits to the projection
+  const applyScenarioToProjection = () => {
+    setAppliedScenarioMod(scenarioMod);
+  };
 
   // Fetch persons, accounts, depots, and positions once on mount
   useEffect(() => {
@@ -149,14 +173,15 @@ export default function ProjectionPage() {
       .catch(() => { /* filter panel will simply not render */ });
   }, []);
 
-  // Fetch projection data (with or without scenario)
+  // Fetch projection data (with or without applied scenario)
   const fetchProjection = useCallback(() => {
     setLoading(true);
     setError("");
 
-    const promise = scenarioMod
-      ? getProjectionWithScenario({ months, startDate: today, scenario: scenarioMod })
-      : getProjection({ months, startDate: today });
+    const inflParam = inflationRate > 0 ? inflationRate : undefined;
+    const promise = appliedScenarioMod
+      ? getProjectionWithScenario({ months, startDate: today, inflationRate: inflParam, scenario: appliedScenarioMod })
+      : getProjection({ months, startDate: today, inflationRate: inflParam });
 
     let cancelled = false;
     promise
@@ -170,7 +195,7 @@ export default function ProjectionPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [months, today, scenarioMod]);
+  }, [months, today, appliedScenarioMod, inflationRate]);
 
   useEffect(() => {
     return fetchProjection();
@@ -206,6 +231,20 @@ export default function ProjectionPage() {
     });
   };
 
+  // Scenario: modify position growth rate
+  const setPositionGrowthRate = (id: number, growthRate: number) => {
+    setModifiedGrowthRates((prev) => {
+      const next = new Map(prev);
+      const orig = positions.find((p) => p.id === id);
+      if (orig && orig.growthRate === growthRate) {
+        next.delete(id);
+      } else {
+        next.set(id, growthRate);
+      }
+      return next;
+    });
+  };
+
   // Scenario: add new virtual position from form
   const handleAddNewPosition = (e: React.FormEvent) => {
     e.preventDefault();
@@ -222,6 +261,7 @@ export default function ProjectionPage() {
       businessDayRule: newPosForm.businessDayRule as Position["businessDayRule"],
       startDate: newPosForm.startDate,
       endDate: newPosForm.endDate || undefined,
+      growthRate: parseFloat(newPosForm.growthRate) || 0,
     };
 
     if (newPosForm.type === "transfer") {
@@ -245,7 +285,47 @@ export default function ProjectionPage() {
   const resetScenario = () => {
     setRemovedPositionIds(new Set());
     setModifiedAmounts(new Map());
+    setModifiedGrowthRates(new Map());
     setNewPositions([]);
+    setAppliedScenarioMod(null);
+  };
+
+  // Scenario: apply all changes to actual positions in the database
+  const applyScenarioToPositions = async () => {
+    if (!hasScenarioChanges) return;
+    setApplyingScenario(true);
+    try {
+      // 1. Update modified positions (amounts and growth rates)
+      const modifiedIds = new Set([...modifiedAmounts.keys(), ...modifiedGrowthRates.keys()]);
+      for (const id of modifiedIds) {
+        const orig = positions.find((p) => p.id === id);
+        if (!orig) continue;
+        const updates: Partial<Position> = {};
+        if (modifiedAmounts.has(id)) updates.amount = modifiedAmounts.get(id)!;
+        if (modifiedGrowthRates.has(id)) updates.growthRate = modifiedGrowthRates.get(id)!;
+        await updatePosition(id, { ...orig, ...updates });
+      }
+
+      // 2. Delete removed positions
+      for (const id of removedPositionIds) {
+        await deletePosition(id);
+      }
+
+      // 3. Create new positions
+      for (const pos of newPositions) {
+        await createPosition(pos);
+      }
+
+      // Refresh positions and reset scenario
+      const updatedPositions = await getPositions();
+      setPositions(updatedPositions);
+      resetScenario();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError("Fehler beim Übernehmen: " + msg);
+    } finally {
+      setApplyingScenario(false);
+    }
   };
 
   // Build a map of account ID -> owner person IDs using the accounts data
@@ -323,27 +403,44 @@ export default function ProjectionPage() {
           const bal = acc.dataPoints[i]?.balance ?? 0;
           row[acc.name] = bal;
           total += bal;
+          // Add inflation-adjusted account line
+          if (acc.inflationAdjustedDataPoints && acc.inflationAdjustedDataPoints[i]) {
+            row[`${acc.name} (real)`] = acc.inflationAdjustedDataPoints[i].balance;
+          }
         }
         row["Gesamt"] = total;
         // Add depot lines
         for (const dp of filteredDepots) {
           const bal = dp.dataPoints[i]?.balance ?? 0;
           row[`📊 ${dp.name}`] = bal;
+          // Add inflation-adjusted depot line
+          if (dp.inflationAdjustedDataPoints && dp.inflationAdjustedDataPoints[i]) {
+            row[`📊 ${dp.name} (real)`] = dp.inflationAdjustedDataPoints[i].balance;
+          }
+        }
+        // Add inflation-adjusted total line
+        if (data.inflationAdjustedTotals && data.inflationAdjustedTotals[i]) {
+          row["Gesamt (inflationsbereinigt)"] = data.inflationAdjustedTotals[i].balance;
         }
         return row;
       })
     : [];
 
   // Compute summary statistics for visible accounts only
+  const hasInflation = data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0;
   const summaryStats = filteredAccounts.map((acc) => {
     const balances = acc.dataPoints.map((dp) => dp.balance);
     const startBal = balances[0] ?? 0;
     const endBal = balances[balances.length - 1] ?? 0;
+    const adjEndBal = acc.inflationAdjustedDataPoints && acc.inflationAdjustedDataPoints.length > 0
+      ? acc.inflationAdjustedDataPoints[acc.inflationAdjustedDataPoints.length - 1]?.balance ?? null
+      : null;
     return {
       name: acc.name,
       currency: acc.currency,
       startBalance: startBal,
       endBalance: endBal,
+      adjustedEndBalance: adjEndBal,
       change: endBal - startBal,
       monthlyNetFlow: acc.monthlyNetFlow,
       min: balances.length > 0 ? Math.min(...balances) : 0,
@@ -395,6 +492,29 @@ export default function ProjectionPage() {
               className="input-sm"
             />
             <span className="custom-years-label">Jahre</span>
+          </div>
+          <div className="custom-years-input">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              placeholder="z.B. 2.0"
+              value={inflationRate || ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "") {
+                  setInflationRate(0);
+                  return;
+                }
+                const num = parseFloat(val);
+                if (!isNaN(num) && num >= 0 && num <= 100) {
+                  setInflationRate(num);
+                }
+              }}
+              className="input-sm"
+            />
+            <span className="custom-years-label">% Inflation</span>
           </div>
         </div>
       </div>
@@ -477,14 +597,28 @@ export default function ProjectionPage() {
             {scenarioOpen && (
               <div className="scenario-content">
                 <p className="scenario-hint">
-                  Passen Sie Positionen temporär an, um verschiedene Szenarien zu simulieren.
-                  Änderungen werden nicht gespeichert.
+                  Passen Sie Positionen temporär an und klicken Sie „Szenario simulieren", um die Projektion zu aktualisieren.
+                  Mit „Änderungen übernehmen" können Sie die Änderungen dauerhaft in die Positionen speichern.
                 </p>
 
                 {hasScenarioChanges && (
                   <div className="scenario-actions">
                     <button className="btn btn-sm btn-secondary" onClick={resetScenario}>
                       Szenario zurücksetzen
+                    </button>
+                    <button
+                      className="btn btn-sm btn-success"
+                      onClick={applyScenarioToProjection}
+                      disabled={!hasUnappliedChanges}
+                    >
+                      Szenario simulieren
+                    </button>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      onClick={applyScenarioToPositions}
+                      disabled={applyingScenario}
+                    >
+                      {applyingScenario ? "Wird übernommen…" : "Änderungen übernehmen"}
                     </button>
                   </div>
                 )}
@@ -501,13 +635,15 @@ export default function ProjectionPage() {
                           <th>Konto</th>
                           <th>Frequenz</th>
                           <th>Betrag (€)</th>
+                          <th>Dynamik (% p.a.)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {positions.map((pos) => {
                           const isRemoved = removedPositionIds.has(pos.id);
                           const modAmount = modifiedAmounts.get(pos.id);
-                          const isModified = modAmount !== undefined;
+                          const modGrowth = modifiedGrowthRates.get(pos.id);
+                          const isModified = modAmount !== undefined || modGrowth !== undefined;
                           const accountName = pos.type === "transfer"
                             ? `${getAccountName(pos.sourceAccountId)} → ${getAccountName(pos.targetAccountId)}`
                             : getAccountName(pos.accountId);
@@ -532,13 +668,26 @@ export default function ProjectionPage() {
                                 <input
                                   type="number"
                                   className="scenario-amount-input"
-                                  value={isModified ? modAmount : pos.amount}
+                                  value={modAmount !== undefined ? modAmount : pos.amount}
                                   step="0.01"
                                   min="0"
                                   disabled={isRemoved}
                                   onChange={(e) => {
                                     const val = parseFloat(e.target.value);
                                     if (!isNaN(val)) setPositionAmount(pos.id, val);
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="scenario-amount-input"
+                                  value={modGrowth !== undefined ? modGrowth : pos.growthRate}
+                                  step="0.1"
+                                  disabled={isRemoved}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    if (!isNaN(val)) setPositionGrowthRate(pos.id, val);
                                   }}
                                 />
                               </td>
@@ -563,6 +712,7 @@ export default function ProjectionPage() {
                           <th>Konto</th>
                           <th>Frequenz</th>
                           <th>Betrag (€)</th>
+                          <th>Dynamik (% p.a.)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -590,6 +740,7 @@ export default function ProjectionPage() {
                               <td>{accountName}</td>
                               <td>{FREQUENCY_LABELS[pos.frequencyType ?? ""] ?? pos.frequencyType}</td>
                               <td className="amount">{formatCurrency(pos.amount ?? 0)}</td>
+                              <td className="amount">{pos.growthRate ? `${pos.growthRate.toFixed(1)}` : "0.0"}</td>
                             </tr>
                           );
                         })}
@@ -748,6 +899,16 @@ export default function ProjectionPage() {
                             onChange={(e) => setNewPosForm({ ...newPosForm, endDate: e.target.value })}
                           />
                         </div>
+                        <div className="form-group">
+                          <label>Dynamik (% p.a.)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={newPosForm.growthRate}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, growthRate: e.target.value })}
+                            placeholder="z.B. 2.0"
+                          />
+                        </div>
                       </div>
                       <div className="form-actions">
                         <button type="button" className="btn btn-sm btn-secondary" onClick={() => setShowNewPosForm(false)}>
@@ -791,11 +952,21 @@ export default function ProjectionPage() {
               </div>
               <div className="stat-label">Veränderung (€)</div>
             </div>
-            <div className="card stat-card">
-              <div className="stat-icon">🏦</div>
-              <div className="stat-value">{filteredAccounts.length}</div>
-              <div className="stat-label">Konten</div>
-            </div>
+            {data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0 ? (
+              <div className="card stat-card">
+                <div className="stat-icon">📉</div>
+                <div className="stat-value">
+                  {formatCurrency(data.inflationAdjustedTotals[data.inflationAdjustedTotals.length - 1]?.balance ?? 0)}
+                </div>
+                <div className="stat-label">Kaufkraftbereinigt (€)</div>
+              </div>
+            ) : (
+              <div className="card stat-card">
+                <div className="stat-icon">🏦</div>
+                <div className="stat-value">{filteredAccounts.length}</div>
+                <div className="stat-label">Konten</div>
+              </div>
+            )}
           </div>
 
           {/* Main Chart */}
@@ -832,6 +1003,20 @@ export default function ProjectionPage() {
                       activeDot={{ r: 4 }}
                     />
                   ))}
+                  {filteredAccounts.map((acc, i) =>
+                    acc.inflationAdjustedDataPoints && acc.inflationAdjustedDataPoints.length > 0 ? (
+                      <Line
+                        key={`adj-${acc.id}`}
+                        type="monotone"
+                        dataKey={`${acc.name} (real)`}
+                        stroke={COLORS[i % COLORS.length]}
+                        strokeWidth={1}
+                        strokeDasharray="3 6"
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    ) : null
+                  )}
                   {filteredAccounts.length > 1 && (
                     <Line
                       type="monotone"
@@ -855,6 +1040,31 @@ export default function ProjectionPage() {
                       activeDot={{ r: 4 }}
                     />
                   ))}
+                  {filteredDepots.map((dp, i) =>
+                    dp.inflationAdjustedDataPoints && dp.inflationAdjustedDataPoints.length > 0 ? (
+                      <Line
+                        key={`depot-adj-${dp.id}`}
+                        type="monotone"
+                        dataKey={`📊 ${dp.name} (real)`}
+                        stroke={COLORS[(filteredAccounts.length + i) % COLORS.length]}
+                        strokeWidth={1}
+                        strokeDasharray="3 6"
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    ) : null
+                  )}
+                  {data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0 && (
+                    <Line
+                      type="monotone"
+                      dataKey="Gesamt (inflationsbereinigt)"
+                      stroke="#e53e3e"
+                      strokeWidth={2}
+                      strokeDasharray="3 6"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -878,6 +1088,7 @@ export default function ProjectionPage() {
                       <th>Konto</th>
                       <th>Aktuell</th>
                       <th>Projiziert</th>
+                      {hasInflation && <th>Kaufkraftbereinigt</th>}
                       <th>Veränderung</th>
                       <th>⌀ mtl. Netto</th>
                       <th>Min</th>
@@ -890,6 +1101,9 @@ export default function ProjectionPage() {
                         <td>{s.name}</td>
                         <td className="amount">{formatCurrency(s.startBalance)} €</td>
                         <td className="amount">{formatCurrency(s.endBalance)} €</td>
+                        {hasInflation && (
+                          <td className="amount">{s.adjustedEndBalance !== null ? formatCurrency(s.adjustedEndBalance) + " €" : "–"}</td>
+                        )}
                         <td className={`amount ${s.change >= 0 ? "amount-positive" : "amount-negative"}`}>
                           {s.change >= 0 ? "+" : ""}
                           {formatCurrency(s.change)} €
@@ -907,6 +1121,13 @@ export default function ProjectionPage() {
                         <td>Gesamt</td>
                         <td className="amount">{formatCurrency(totalStart)} €</td>
                         <td className="amount">{formatCurrency(totalEnd)} €</td>
+                        {hasInflation && (
+                          <td className="amount">
+                            {data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0
+                              ? formatCurrency(data.inflationAdjustedTotals[data.inflationAdjustedTotals.length - 1]?.balance ?? 0) + " €"
+                              : "–"}
+                          </td>
+                        )}
                         <td className={`amount ${totalChange >= 0 ? "amount-positive" : "amount-negative"}`}>
                           {totalChange >= 0 ? "+" : ""}
                           {formatCurrency(totalChange)} €
@@ -937,6 +1158,7 @@ export default function ProjectionPage() {
                       <th>Zinssatz</th>
                       <th>Aktuell</th>
                       <th>Projiziert</th>
+                      {hasInflation && <th>Kaufkraftbereinigt</th>}
                       <th>Veränderung</th>
                     </tr>
                   </thead>
@@ -945,12 +1167,18 @@ export default function ProjectionPage() {
                       const startBal = dp.dataPoints[0]?.balance ?? 0;
                       const endBal = dp.dataPoints[dp.dataPoints.length - 1]?.balance ?? 0;
                       const change = endBal - startBal;
+                      const adjEndBal = dp.inflationAdjustedDataPoints && dp.inflationAdjustedDataPoints.length > 0
+                        ? dp.inflationAdjustedDataPoints[dp.inflationAdjustedDataPoints.length - 1]?.balance ?? null
+                        : null;
                       return (
                         <tr key={dp.id}>
                           <td>📊 {dp.name}</td>
                           <td>{dp.interestRate.toFixed(2)} % p.a.</td>
                           <td className="amount">{formatCurrency(startBal)} €</td>
                           <td className="amount">{formatCurrency(endBal)} €</td>
+                          {hasInflation && (
+                            <td className="amount">{adjEndBal !== null ? formatCurrency(adjEndBal) + " €" : "–"}</td>
+                          )}
                           <td className={`amount ${change >= 0 ? "amount-positive" : "amount-negative"}`}>
                             {change >= 0 ? "+" : ""}
                             {formatCurrency(change)} €

@@ -2021,3 +2021,404 @@ func TestSemiAnnuallyWithMonthOfYear(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectionGrowthRate(t *testing.T) {
+setupTestDB(t)
+router := setupRouter()
+
+// Create account with balance 0
+accountData := map[string]interface{}{
+"name":     "Girokonto",
+"balance":  0.0,
+"currency": "EUR",
+}
+body, _ := json.Marshal(accountData)
+w := httptest.NewRecorder()
+req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+// Create monthly expense of 1000 starting 2025-01-01 with 12% growth rate p.a.
+posData := map[string]interface{}{
+"name":            "Miete",
+"type":            "expense",
+"amount":          1000.00,
+"accountId":       1,
+"frequencyType":   "monthly",
+"interval":        1,
+"dayOfMonth":      1,
+"businessDayRule": "exact",
+"startDate":       "2025-01-01",
+"growthRate":      12.0,
+}
+body, _ = json.Marshal(posData)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+// Verify growthRate is returned
+var createdPos models.Position
+json.Unmarshal(w.Body.Bytes(), &createdPos)
+if createdPos.GrowthRate != 12.0 {
+t.Fatalf("Expected growthRate 12.0, got %.2f", createdPos.GrowthRate)
+}
+
+// Get projection for 12 months starting 2025-01-01 (monthly granularity)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2025-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var result struct {
+Accounts []struct {
+DataPoints []struct {
+Date    string  `json:"date"`
+Balance float64 `json:"balance"`
+} `json:"dataPoints"`
+} `json:"accounts"`
+}
+json.Unmarshal(w.Body.Bytes(), &result)
+
+if len(result.Accounts) != 1 || len(result.Accounts[0].DataPoints) < 2 {
+t.Fatalf("Expected at least 2 data points")
+}
+
+// At month 0 (2025-01-01), yearsElapsed=0 so expense=1000, balance=-1000
+firstBal := result.Accounts[0].DataPoints[0].Balance
+if firstBal != -1000.0 {
+t.Fatalf("Expected first balance -1000.00, got %.2f", firstBal)
+}
+
+// At month 12 (2026-01-01), yearsElapsed=1.0 so the expense should be ~1120 (1000*1.12^1)
+// The cumulative balance should be more negative than 12*(-1000) = -12000 because of growth
+lastIdx := len(result.Accounts[0].DataPoints) - 1
+lastBal := result.Accounts[0].DataPoints[lastIdx].Balance
+if lastBal >= -12000.0 {
+t.Fatalf("Expected last balance more negative than -12000 due to growth, got %.2f", lastBal)
+}
+}
+
+func TestProjectionInflationAdjusted(t *testing.T) {
+setupTestDB(t)
+router := setupRouter()
+
+// Create account with balance 10000
+accountData := map[string]interface{}{
+"name":     "Sparkonto",
+"balance":  10000.0,
+"currency": "EUR",
+}
+body, _ := json.Marshal(accountData)
+w := httptest.NewRecorder()
+req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+// Get projection without inflation - should have no inflationAdjustedTotals
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var resultNoInfl struct {
+Totals                  []struct{ Balance float64 } `json:"totals"`
+InflationAdjustedTotals []struct{ Balance float64 } `json:"inflationAdjustedTotals"`
+}
+json.Unmarshal(w.Body.Bytes(), &resultNoInfl)
+if len(resultNoInfl.InflationAdjustedTotals) != 0 {
+t.Fatalf("Expected no inflation-adjusted totals when rate is 0, got %d", len(resultNoInfl.InflationAdjustedTotals))
+}
+
+// Get projection with 10% inflation
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly&inflationRate=10", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var resultInfl struct {
+Totals                  []struct{ Balance float64 } `json:"totals"`
+InflationAdjustedTotals []struct{ Balance float64 } `json:"inflationAdjustedTotals"`
+}
+json.Unmarshal(w.Body.Bytes(), &resultInfl)
+
+if len(resultInfl.InflationAdjustedTotals) == 0 {
+t.Fatalf("Expected inflation-adjusted totals when rate is 10%%")
+}
+if len(resultInfl.InflationAdjustedTotals) != len(resultInfl.Totals) {
+t.Fatalf("Expected same number of adjusted totals as totals")
+}
+
+// First data point should be equal (yearsElapsed ≈ 0)
+firstTotal := resultInfl.Totals[0].Balance
+firstAdj := resultInfl.InflationAdjustedTotals[0].Balance
+if firstTotal != firstAdj {
+t.Fatalf("Expected first adjusted total == first total (%.2f), got %.2f", firstTotal, firstAdj)
+}
+
+// Last data point: ~12 months = ~1 year => adjusted should be total / 1.10 ≈ 9090.91
+lastIdx := len(resultInfl.Totals) - 1
+lastTotal := resultInfl.Totals[lastIdx].Balance
+lastAdj := resultInfl.InflationAdjustedTotals[lastIdx].Balance
+if lastAdj >= lastTotal {
+t.Fatalf("Expected last adjusted (%.2f) < last total (%.2f)", lastAdj, lastTotal)
+}
+// With 10% inflation over ~1 year, adjusted should be ~90.9% of total
+ratio := lastAdj / lastTotal
+if ratio < 0.89 || ratio > 0.93 {
+t.Fatalf("Expected ratio ~0.91, got %.4f (adj=%.2f, total=%.2f)", ratio, lastAdj, lastTotal)
+}
+}
+
+func TestProjectionInflationAdjustedAccountsAndDepots(t *testing.T) {
+setupTestDB(t)
+router := setupRouter()
+
+// Create account with balance 10000
+accountData := map[string]interface{}{
+"name":     "Sparkonto",
+"balance":  10000.0,
+"currency": "EUR",
+}
+body, _ := json.Marshal(accountData)
+w := httptest.NewRecorder()
+req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+// Create depot linked to that account
+depotData := map[string]interface{}{
+"name":         "Depot1",
+"interestRate": 5.0,
+"accountIds":   []uint{1},
+}
+body, _ = json.Marshal(depotData)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("POST", "/api/depots", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+// Get projection WITHOUT inflation - inflationAdjustedDataPoints should be absent
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var resultNoInfl struct {
+Accounts []struct {
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"accounts"`
+Depots []struct {
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"depots"`
+}
+json.Unmarshal(w.Body.Bytes(), &resultNoInfl)
+if len(resultNoInfl.Accounts) == 0 {
+t.Fatal("Expected at least 1 account")
+}
+if len(resultNoInfl.Accounts[0].InflationAdjustedDataPoints) != 0 {
+t.Fatalf("Expected no inflation-adjusted data points on account when rate is 0, got %d", len(resultNoInfl.Accounts[0].InflationAdjustedDataPoints))
+}
+if len(resultNoInfl.Depots) == 0 {
+t.Fatal("Expected at least 1 depot")
+}
+if len(resultNoInfl.Depots[0].InflationAdjustedDataPoints) != 0 {
+t.Fatalf("Expected no inflation-adjusted data points on depot when rate is 0, got %d", len(resultNoInfl.Depots[0].InflationAdjustedDataPoints))
+}
+
+// Get projection WITH 10% inflation
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly&inflationRate=10", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var result struct {
+Accounts []struct {
+DataPoints                  []struct{ Balance float64 } `json:"dataPoints"`
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"accounts"`
+Depots []struct {
+DataPoints                  []struct{ Balance float64 } `json:"dataPoints"`
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"depots"`
+}
+json.Unmarshal(w.Body.Bytes(), &result)
+
+// Verify account inflation-adjusted data points
+if len(result.Accounts) == 0 {
+t.Fatal("Expected at least 1 account")
+}
+acc := result.Accounts[0]
+if len(acc.InflationAdjustedDataPoints) == 0 {
+t.Fatal("Expected inflation-adjusted data points on account")
+}
+if len(acc.InflationAdjustedDataPoints) != len(acc.DataPoints) {
+t.Fatalf("Expected same length, got %d vs %d", len(acc.InflationAdjustedDataPoints), len(acc.DataPoints))
+}
+// First point should match (yearsElapsed ≈ 0)
+if acc.InflationAdjustedDataPoints[0].Balance != acc.DataPoints[0].Balance {
+t.Fatalf("First point should match: adj=%.2f, orig=%.2f", acc.InflationAdjustedDataPoints[0].Balance, acc.DataPoints[0].Balance)
+}
+// Last point should be discounted (~90.9% of nominal after 1 year at 10%)
+lastIdx := len(acc.DataPoints) - 1
+ratio := acc.InflationAdjustedDataPoints[lastIdx].Balance / acc.DataPoints[lastIdx].Balance
+if ratio < 0.89 || ratio > 0.93 {
+t.Fatalf("Account: expected ratio ~0.91, got %.4f", ratio)
+}
+
+// Verify depot inflation-adjusted data points
+if len(result.Depots) == 0 {
+t.Fatal("Expected at least 1 depot")
+}
+dep := result.Depots[0]
+if len(dep.InflationAdjustedDataPoints) == 0 {
+t.Fatal("Expected inflation-adjusted data points on depot")
+}
+if len(dep.InflationAdjustedDataPoints) != len(dep.DataPoints) {
+t.Fatalf("Expected same length, got %d vs %d", len(dep.InflationAdjustedDataPoints), len(dep.DataPoints))
+}
+// Last point should be discounted
+depLastIdx := len(dep.DataPoints) - 1
+depRatio := dep.InflationAdjustedDataPoints[depLastIdx].Balance / dep.DataPoints[depLastIdx].Balance
+if depRatio < 0.89 || depRatio > 0.93 {
+t.Fatalf("Depot: expected ratio ~0.91, got %.4f", depRatio)
+}
+}
+
+func TestProjectionScenarioGrowthRate(t *testing.T) {
+setupTestDB(t)
+router := setupRouter()
+
+// Create account with balance 1000
+accountData := map[string]interface{}{
+"name":     "Konto",
+"balance":  1000.0,
+"currency": "EUR",
+}
+body, _ := json.Marshal(accountData)
+w := httptest.NewRecorder()
+req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+accountID := uint(1)
+// Create monthly income of 1000 with 0% growth
+posData := map[string]interface{}{
+"name":            "Gehalt",
+"type":            "income",
+"amount":          1000.00,
+"accountId":       accountID,
+"frequencyType":   "monthly",
+"interval":        1,
+"dayOfMonth":      1,
+"businessDayRule": "exact",
+"startDate":       "2025-01-01",
+"growthRate":      0.0,
+}
+body, _ = json.Marshal(posData)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201 for position, got %d: %s", w.Code, w.Body.String())
+}
+var pos models.Position
+json.Unmarshal(w.Body.Bytes(), &pos)
+
+// Baseline projection (no growth)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d", w.Code)
+}
+type dpResult struct {
+Accounts []struct {
+DataPoints []struct{ Balance float64 } `json:"dataPoints"`
+} `json:"accounts"`
+}
+var baseline dpResult
+json.Unmarshal(w.Body.Bytes(), &baseline)
+baselineEnd := baseline.Accounts[0].DataPoints[len(baseline.Accounts[0].DataPoints)-1].Balance
+
+// Scenario: modify the position to have 50% annual growth
+scenarioData := map[string]interface{}{
+"modifiedPositions": []map[string]interface{}{
+{
+"id":              pos.ID,
+"name":            pos.Name,
+"type":            pos.Type,
+"amount":          pos.Amount,
+"accountId":       accountID,
+"frequencyType":   pos.FrequencyType,
+"interval":        pos.Interval,
+"dayOfMonth":      1,
+"businessDayRule": pos.BusinessDayRule,
+"startDate":       "2025-01-01",
+"growthRate":      50.0,
+},
+},
+"removedPositionIds": []uint{},
+"newPositions":       []interface{}{},
+}
+body, _ = json.Marshal(scenarioData)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("POST", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+var scenarioResult dpResult
+json.Unmarshal(w.Body.Bytes(), &scenarioResult)
+scenarioEnd := scenarioResult.Accounts[0].DataPoints[len(scenarioResult.Accounts[0].DataPoints)-1].Balance
+
+// With 50% annual growth, each occurrence should yield more than base amount
+// The scenario end should be larger than the baseline end
+if scenarioEnd <= baselineEnd {
+t.Fatalf("With 50%% growth scenario, end balance should be > baseline. Scenario=%.2f, Baseline=%.2f", scenarioEnd, baselineEnd)
+}
+
+// Verify baseline is still unchanged after scenario
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d", w.Code)
+}
+var afterScenario dpResult
+json.Unmarshal(w.Body.Bytes(), &afterScenario)
+afterEnd := afterScenario.Accounts[0].DataPoints[len(afterScenario.Accounts[0].DataPoints)-1].Balance
+if afterEnd != baselineEnd {
+t.Fatalf("After scenario, baseline should be unchanged. Got %.2f, expected %.2f", afterEnd, baselineEnd)
+}
+}

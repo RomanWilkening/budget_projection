@@ -159,6 +159,8 @@ type Position struct {
 	StartDate       FlexDate        `json:"startDate" gorm:"not null"`
 	EndDate         *FlexDate       `json:"endDate"`                         // nil = indefinite
 
+	GrowthRate      float64         `json:"growthRate" gorm:"default:0"`     // annual growth rate in percent (e.g. 2.0 = 2% p.a.)
+
 	SortOrder       int             `json:"sortOrder" gorm:"default:0"`      // user-defined display order
 
 	CreatedAt       time.Time       `json:"createdAt"`
