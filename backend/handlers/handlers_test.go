@@ -2309,3 +2309,116 @@ if depRatio < 0.89 || depRatio > 0.93 {
 t.Fatalf("Depot: expected ratio ~0.91, got %.4f", depRatio)
 }
 }
+
+func TestProjectionScenarioGrowthRate(t *testing.T) {
+setupTestDB(t)
+router := setupRouter()
+
+// Create account with balance 1000
+accountData := map[string]interface{}{
+"name":     "Konto",
+"balance":  1000.0,
+"currency": "EUR",
+}
+body, _ := json.Marshal(accountData)
+w := httptest.NewRecorder()
+req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+accountID := uint(1)
+// Create monthly income of 1000 with 0% growth
+posData := map[string]interface{}{
+"name":            "Gehalt",
+"type":            "income",
+"amount":          1000.00,
+"accountId":       accountID,
+"frequencyType":   "monthly",
+"interval":        1,
+"dayOfMonth":      1,
+"businessDayRule": "exact",
+"startDate":       "2025-01-01",
+"growthRate":      0.0,
+}
+body, _ = json.Marshal(posData)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("POST", "/api/positions", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201 for position, got %d: %s", w.Code, w.Body.String())
+}
+var pos models.Position
+json.Unmarshal(w.Body.Bytes(), &pos)
+
+// Baseline projection (no growth)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d", w.Code)
+}
+type dpResult struct {
+Accounts []struct {
+DataPoints []struct{ Balance float64 } `json:"dataPoints"`
+} `json:"accounts"`
+}
+var baseline dpResult
+json.Unmarshal(w.Body.Bytes(), &baseline)
+baselineEnd := baseline.Accounts[0].DataPoints[len(baseline.Accounts[0].DataPoints)-1].Balance
+
+// Scenario: modify the position to have 50% annual growth
+scenarioData := map[string]interface{}{
+"modifiedPositions": []map[string]interface{}{
+{
+"id":              pos.ID,
+"name":            pos.Name,
+"type":            pos.Type,
+"amount":          pos.Amount,
+"accountId":       accountID,
+"frequencyType":   pos.FrequencyType,
+"interval":        pos.Interval,
+"dayOfMonth":      1,
+"businessDayRule": pos.BusinessDayRule,
+"startDate":       "2025-01-01",
+"growthRate":      50.0,
+},
+},
+"removedPositionIds": []uint{},
+"newPositions":       []interface{}{},
+}
+body, _ = json.Marshal(scenarioData)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("POST", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+var scenarioResult dpResult
+json.Unmarshal(w.Body.Bytes(), &scenarioResult)
+scenarioEnd := scenarioResult.Accounts[0].DataPoints[len(scenarioResult.Accounts[0].DataPoints)-1].Balance
+
+// With 50% annual growth, each occurrence should yield more than base amount
+// The scenario end should be larger than the baseline end
+if scenarioEnd <= baselineEnd {
+t.Fatalf("With 50%% growth scenario, end balance should be > baseline. Scenario=%.2f, Baseline=%.2f", scenarioEnd, baselineEnd)
+}
+
+// Verify baseline is still unchanged after scenario
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d", w.Code)
+}
+var afterScenario dpResult
+json.Unmarshal(w.Body.Bytes(), &afterScenario)
+afterEnd := afterScenario.Accounts[0].DataPoints[len(afterScenario.Accounts[0].DataPoints)-1].Balance
+if afterEnd != baselineEnd {
+t.Fatalf("After scenario, baseline should be unchanged. Got %.2f, expected %.2f", afterEnd, baselineEnd)
+}
+}

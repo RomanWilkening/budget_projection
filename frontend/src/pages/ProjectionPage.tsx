@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import { getProjection, getProjectionWithScenario, getPersons, getAccounts, getDepots, getPositions } from "../api";
+import { getProjection, getProjectionWithScenario, getPersons, getAccounts, getDepots, getPositions, updatePosition, createPosition, deletePosition } from "../api";
 import type { ProjectionResponse, Person, Account, Depot, Position, ScenarioModification } from "../types";
 
 const COLORS = [
@@ -74,6 +74,7 @@ interface NewPositionForm {
   businessDayRule: string;
   startDate: string;
   endDate: string;
+  growthRate: string;
 }
 
 const emptyNewPosition: NewPositionForm = {
@@ -89,6 +90,7 @@ const emptyNewPosition: NewPositionForm = {
   businessDayRule: "exact",
   startDate: new Date().toISOString().split("T")[0],
   endDate: "",
+  growthRate: "0",
 };
 
 export default function ProjectionPage() {
@@ -109,25 +111,32 @@ export default function ProjectionPage() {
   const [scenarioOpen, setScenarioOpen] = useState(false);
   const [removedPositionIds, setRemovedPositionIds] = useState<Set<number>>(new Set());
   const [modifiedAmounts, setModifiedAmounts] = useState<Map<number, number>>(new Map());
+  const [modifiedGrowthRates, setModifiedGrowthRates] = useState<Map<number, number>>(new Map());
   const [newPositions, setNewPositions] = useState<Partial<Position>[]>([]);
   const [showNewPosForm, setShowNewPosForm] = useState(false);
   const [newPosForm, setNewPosForm] = useState<NewPositionForm>({ ...emptyNewPosition });
+  const [applyingScenario, setApplyingScenario] = useState(false);
 
   // Inflation state
   const [inflationRate, setInflationRate] = useState(0);
 
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  const hasScenarioChanges = removedPositionIds.size > 0 || modifiedAmounts.size > 0 || newPositions.length > 0;
+  const hasScenarioChanges = removedPositionIds.size > 0 || modifiedAmounts.size > 0 || modifiedGrowthRates.size > 0 || newPositions.length > 0;
 
   // Build the scenario modification object
   const scenarioMod = useMemo((): ScenarioModification | null => {
     if (!hasScenarioChanges) return null;
+    // Collect all position IDs that have any modification
+    const modifiedIds = new Set([...modifiedAmounts.keys(), ...modifiedGrowthRates.keys()]);
     const modified: Position[] = [];
-    for (const [id, amount] of modifiedAmounts) {
+    for (const id of modifiedIds) {
       const orig = positions.find((p) => p.id === id);
       if (orig) {
-        modified.push({ ...orig, amount });
+        const pos = { ...orig };
+        if (modifiedAmounts.has(id)) pos.amount = modifiedAmounts.get(id)!;
+        if (modifiedGrowthRates.has(id)) pos.growthRate = modifiedGrowthRates.get(id)!;
+        modified.push(pos);
       }
     }
     return {
@@ -135,7 +144,7 @@ export default function ProjectionPage() {
       removedPositionIds: Array.from(removedPositionIds),
       newPositions,
     };
-  }, [hasScenarioChanges, modifiedAmounts, removedPositionIds, newPositions, positions]);
+  }, [hasScenarioChanges, modifiedAmounts, modifiedGrowthRates, removedPositionIds, newPositions, positions]);
 
   // Fetch persons, accounts, depots, and positions once on mount
   useEffect(() => {
@@ -210,6 +219,20 @@ export default function ProjectionPage() {
     });
   };
 
+  // Scenario: modify position growth rate
+  const setPositionGrowthRate = (id: number, growthRate: number) => {
+    setModifiedGrowthRates((prev) => {
+      const next = new Map(prev);
+      const orig = positions.find((p) => p.id === id);
+      if (orig && orig.growthRate === growthRate) {
+        next.delete(id);
+      } else {
+        next.set(id, growthRate);
+      }
+      return next;
+    });
+  };
+
   // Scenario: add new virtual position from form
   const handleAddNewPosition = (e: React.FormEvent) => {
     e.preventDefault();
@@ -226,6 +249,7 @@ export default function ProjectionPage() {
       businessDayRule: newPosForm.businessDayRule as Position["businessDayRule"],
       startDate: newPosForm.startDate,
       endDate: newPosForm.endDate || undefined,
+      growthRate: parseFloat(newPosForm.growthRate) || 0,
     };
 
     if (newPosForm.type === "transfer") {
@@ -249,7 +273,46 @@ export default function ProjectionPage() {
   const resetScenario = () => {
     setRemovedPositionIds(new Set());
     setModifiedAmounts(new Map());
+    setModifiedGrowthRates(new Map());
     setNewPositions([]);
+  };
+
+  // Scenario: apply all changes to actual positions in the database
+  const applyScenarioToPositions = async () => {
+    if (!hasScenarioChanges) return;
+    setApplyingScenario(true);
+    try {
+      // 1. Update modified positions (amounts and growth rates)
+      const modifiedIds = new Set([...modifiedAmounts.keys(), ...modifiedGrowthRates.keys()]);
+      for (const id of modifiedIds) {
+        const orig = positions.find((p) => p.id === id);
+        if (!orig) continue;
+        const updates: Partial<Position> = {};
+        if (modifiedAmounts.has(id)) updates.amount = modifiedAmounts.get(id)!;
+        if (modifiedGrowthRates.has(id)) updates.growthRate = modifiedGrowthRates.get(id)!;
+        await updatePosition(id, { ...orig, ...updates });
+      }
+
+      // 2. Delete removed positions
+      for (const id of removedPositionIds) {
+        await deletePosition(id);
+      }
+
+      // 3. Create new positions
+      for (const pos of newPositions) {
+        await createPosition(pos);
+      }
+
+      // Refresh positions and reset scenario
+      const updatedPositions = await getPositions();
+      setPositions(updatedPositions);
+      resetScenario();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError("Fehler beim Übernehmen: " + msg);
+    } finally {
+      setApplyingScenario(false);
+    }
   };
 
   // Build a map of account ID -> owner person IDs using the accounts data
@@ -522,13 +585,20 @@ export default function ProjectionPage() {
               <div className="scenario-content">
                 <p className="scenario-hint">
                   Passen Sie Positionen temporär an, um verschiedene Szenarien zu simulieren.
-                  Änderungen werden nicht gespeichert.
+                  Mit „Änderungen übernehmen" können Sie die Änderungen in die Positionen speichern.
                 </p>
 
                 {hasScenarioChanges && (
                   <div className="scenario-actions">
                     <button className="btn btn-sm btn-secondary" onClick={resetScenario}>
                       Szenario zurücksetzen
+                    </button>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      onClick={applyScenarioToPositions}
+                      disabled={applyingScenario}
+                    >
+                      {applyingScenario ? "Wird übernommen…" : "Änderungen übernehmen"}
                     </button>
                   </div>
                 )}
@@ -545,13 +615,15 @@ export default function ProjectionPage() {
                           <th>Konto</th>
                           <th>Frequenz</th>
                           <th>Betrag (€)</th>
+                          <th>Dynamik (% p.a.)</th>
                         </tr>
                       </thead>
                       <tbody>
                         {positions.map((pos) => {
                           const isRemoved = removedPositionIds.has(pos.id);
                           const modAmount = modifiedAmounts.get(pos.id);
-                          const isModified = modAmount !== undefined;
+                          const modGrowth = modifiedGrowthRates.get(pos.id);
+                          const isModified = modAmount !== undefined || modGrowth !== undefined;
                           const accountName = pos.type === "transfer"
                             ? `${getAccountName(pos.sourceAccountId)} → ${getAccountName(pos.targetAccountId)}`
                             : getAccountName(pos.accountId);
@@ -576,13 +648,26 @@ export default function ProjectionPage() {
                                 <input
                                   type="number"
                                   className="scenario-amount-input"
-                                  value={isModified ? modAmount : pos.amount}
+                                  value={modAmount !== undefined ? modAmount : pos.amount}
                                   step="0.01"
                                   min="0"
                                   disabled={isRemoved}
                                   onChange={(e) => {
                                     const val = parseFloat(e.target.value);
                                     if (!isNaN(val)) setPositionAmount(pos.id, val);
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <input
+                                  type="number"
+                                  className="scenario-amount-input"
+                                  value={modGrowth !== undefined ? modGrowth : pos.growthRate}
+                                  step="0.1"
+                                  disabled={isRemoved}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    if (!isNaN(val)) setPositionGrowthRate(pos.id, val);
                                   }}
                                 />
                               </td>
@@ -607,6 +692,7 @@ export default function ProjectionPage() {
                           <th>Konto</th>
                           <th>Frequenz</th>
                           <th>Betrag (€)</th>
+                          <th>Dynamik (% p.a.)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -634,6 +720,7 @@ export default function ProjectionPage() {
                               <td>{accountName}</td>
                               <td>{FREQUENCY_LABELS[pos.frequencyType ?? ""] ?? pos.frequencyType}</td>
                               <td className="amount">{formatCurrency(pos.amount ?? 0)}</td>
+                              <td className="amount">{pos.growthRate ? `${pos.growthRate.toFixed(1)}` : "0.0"}</td>
                             </tr>
                           );
                         })}
@@ -790,6 +877,16 @@ export default function ProjectionPage() {
                             type="date"
                             value={newPosForm.endDate}
                             onChange={(e) => setNewPosForm({ ...newPosForm, endDate: e.target.value })}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Dynamik (% p.a.)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={newPosForm.growthRate}
+                            onChange={(e) => setNewPosForm({ ...newPosForm, growthRate: e.target.value })}
+                            placeholder="z.B. 2.0"
                           />
                         </div>
                       </div>
