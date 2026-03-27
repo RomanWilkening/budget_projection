@@ -2184,3 +2184,128 @@ if ratio < 0.89 || ratio > 0.93 {
 t.Fatalf("Expected ratio ~0.91, got %.4f (adj=%.2f, total=%.2f)", ratio, lastAdj, lastTotal)
 }
 }
+
+func TestProjectionInflationAdjustedAccountsAndDepots(t *testing.T) {
+setupTestDB(t)
+router := setupRouter()
+
+// Create account with balance 10000
+accountData := map[string]interface{}{
+"name":     "Sparkonto",
+"balance":  10000.0,
+"currency": "EUR",
+}
+body, _ := json.Marshal(accountData)
+w := httptest.NewRecorder()
+req, _ := http.NewRequest("POST", "/api/accounts", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+// Create depot linked to that account
+depotData := map[string]interface{}{
+"name":         "Depot1",
+"interestRate": 5.0,
+"accountIds":   []uint{1},
+}
+body, _ = json.Marshal(depotData)
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("POST", "/api/depots", bytes.NewBuffer(body))
+req.Header.Set("Content-Type", "application/json")
+router.ServeHTTP(w, req)
+if w.Code != http.StatusCreated {
+t.Fatalf("Expected 201, got %d: %s", w.Code, w.Body.String())
+}
+
+// Get projection WITHOUT inflation - inflationAdjustedDataPoints should be absent
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var resultNoInfl struct {
+Accounts []struct {
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"accounts"`
+Depots []struct {
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"depots"`
+}
+json.Unmarshal(w.Body.Bytes(), &resultNoInfl)
+if len(resultNoInfl.Accounts) == 0 {
+t.Fatal("Expected at least 1 account")
+}
+if len(resultNoInfl.Accounts[0].InflationAdjustedDataPoints) != 0 {
+t.Fatalf("Expected no inflation-adjusted data points on account when rate is 0, got %d", len(resultNoInfl.Accounts[0].InflationAdjustedDataPoints))
+}
+if len(resultNoInfl.Depots) == 0 {
+t.Fatal("Expected at least 1 depot")
+}
+if len(resultNoInfl.Depots[0].InflationAdjustedDataPoints) != 0 {
+t.Fatalf("Expected no inflation-adjusted data points on depot when rate is 0, got %d", len(resultNoInfl.Depots[0].InflationAdjustedDataPoints))
+}
+
+// Get projection WITH 10% inflation
+w = httptest.NewRecorder()
+req, _ = http.NewRequest("GET", "/api/projection?months=12&startDate=2026-01-01&granularity=monthly&inflationRate=10", nil)
+router.ServeHTTP(w, req)
+if w.Code != http.StatusOK {
+t.Fatalf("Expected 200, got %d: %s", w.Code, w.Body.String())
+}
+
+var result struct {
+Accounts []struct {
+DataPoints                  []struct{ Balance float64 } `json:"dataPoints"`
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"accounts"`
+Depots []struct {
+DataPoints                  []struct{ Balance float64 } `json:"dataPoints"`
+InflationAdjustedDataPoints []struct{ Balance float64 } `json:"inflationAdjustedDataPoints"`
+} `json:"depots"`
+}
+json.Unmarshal(w.Body.Bytes(), &result)
+
+// Verify account inflation-adjusted data points
+if len(result.Accounts) == 0 {
+t.Fatal("Expected at least 1 account")
+}
+acc := result.Accounts[0]
+if len(acc.InflationAdjustedDataPoints) == 0 {
+t.Fatal("Expected inflation-adjusted data points on account")
+}
+if len(acc.InflationAdjustedDataPoints) != len(acc.DataPoints) {
+t.Fatalf("Expected same length, got %d vs %d", len(acc.InflationAdjustedDataPoints), len(acc.DataPoints))
+}
+// First point should match (yearsElapsed ≈ 0)
+if acc.InflationAdjustedDataPoints[0].Balance != acc.DataPoints[0].Balance {
+t.Fatalf("First point should match: adj=%.2f, orig=%.2f", acc.InflationAdjustedDataPoints[0].Balance, acc.DataPoints[0].Balance)
+}
+// Last point should be discounted (~90.9% of nominal after 1 year at 10%)
+lastIdx := len(acc.DataPoints) - 1
+ratio := acc.InflationAdjustedDataPoints[lastIdx].Balance / acc.DataPoints[lastIdx].Balance
+if ratio < 0.89 || ratio > 0.93 {
+t.Fatalf("Account: expected ratio ~0.91, got %.4f", ratio)
+}
+
+// Verify depot inflation-adjusted data points
+if len(result.Depots) == 0 {
+t.Fatal("Expected at least 1 depot")
+}
+dep := result.Depots[0]
+if len(dep.InflationAdjustedDataPoints) == 0 {
+t.Fatal("Expected inflation-adjusted data points on depot")
+}
+if len(dep.InflationAdjustedDataPoints) != len(dep.DataPoints) {
+t.Fatalf("Expected same length, got %d vs %d", len(dep.InflationAdjustedDataPoints), len(dep.DataPoints))
+}
+// Last point should be discounted
+depLastIdx := len(dep.DataPoints) - 1
+depRatio := dep.InflationAdjustedDataPoints[depLastIdx].Balance / dep.DataPoints[depLastIdx].Balance
+if depRatio < 0.89 || depRatio > 0.93 {
+t.Fatalf("Depot: expected ratio ~0.91, got %.4f", depRatio)
+}
+}

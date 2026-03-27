@@ -80,6 +80,7 @@ export interface AccountProjection {
   name: string;
   currency: string;
   dataPoints: ProjectionDataPoint[];
+  inflationAdjustedDataPoints?: ProjectionDataPoint[];
   monthlyNetFlow: number;
 }
 
@@ -105,6 +106,7 @@ export interface DepotProjection {
   name: string;
   interestRate: number;
   dataPoints: ProjectionDataPoint[];
+  inflationAdjustedDataPoints?: ProjectionDataPoint[];
 }
 
 export interface BridgeAccount {

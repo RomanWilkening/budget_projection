@@ -327,12 +327,20 @@ export default function ProjectionPage() {
           const bal = acc.dataPoints[i]?.balance ?? 0;
           row[acc.name] = bal;
           total += bal;
+          // Add inflation-adjusted account line
+          if (acc.inflationAdjustedDataPoints && acc.inflationAdjustedDataPoints[i]) {
+            row[`${acc.name} (real)`] = acc.inflationAdjustedDataPoints[i].balance;
+          }
         }
         row["Gesamt"] = total;
         // Add depot lines
         for (const dp of filteredDepots) {
           const bal = dp.dataPoints[i]?.balance ?? 0;
           row[`📊 ${dp.name}`] = bal;
+          // Add inflation-adjusted depot line
+          if (dp.inflationAdjustedDataPoints && dp.inflationAdjustedDataPoints[i]) {
+            row[`📊 ${dp.name} (real)`] = dp.inflationAdjustedDataPoints[i].balance;
+          }
         }
         // Add inflation-adjusted total line
         if (data.inflationAdjustedTotals && data.inflationAdjustedTotals[i]) {
@@ -343,15 +351,20 @@ export default function ProjectionPage() {
     : [];
 
   // Compute summary statistics for visible accounts only
+  const hasInflation = data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0;
   const summaryStats = filteredAccounts.map((acc) => {
     const balances = acc.dataPoints.map((dp) => dp.balance);
     const startBal = balances[0] ?? 0;
     const endBal = balances[balances.length - 1] ?? 0;
+    const adjEndBal = acc.inflationAdjustedDataPoints && acc.inflationAdjustedDataPoints.length > 0
+      ? acc.inflationAdjustedDataPoints[acc.inflationAdjustedDataPoints.length - 1]?.balance ?? null
+      : null;
     return {
       name: acc.name,
       currency: acc.currency,
       startBalance: startBal,
       endBalance: endBal,
+      adjustedEndBalance: adjEndBal,
       change: endBal - startBal,
       monthlyNetFlow: acc.monthlyNetFlow,
       min: balances.length > 0 ? Math.min(...balances) : 0,
@@ -873,6 +886,20 @@ export default function ProjectionPage() {
                       activeDot={{ r: 4 }}
                     />
                   ))}
+                  {filteredAccounts.map((acc, i) =>
+                    acc.inflationAdjustedDataPoints && acc.inflationAdjustedDataPoints.length > 0 ? (
+                      <Line
+                        key={`adj-${acc.id}`}
+                        type="monotone"
+                        dataKey={`${acc.name} (real)`}
+                        stroke={COLORS[i % COLORS.length]}
+                        strokeWidth={1}
+                        strokeDasharray="3 6"
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    ) : null
+                  )}
                   {filteredAccounts.length > 1 && (
                     <Line
                       type="monotone"
@@ -896,6 +923,20 @@ export default function ProjectionPage() {
                       activeDot={{ r: 4 }}
                     />
                   ))}
+                  {filteredDepots.map((dp, i) =>
+                    dp.inflationAdjustedDataPoints && dp.inflationAdjustedDataPoints.length > 0 ? (
+                      <Line
+                        key={`depot-adj-${dp.id}`}
+                        type="monotone"
+                        dataKey={`📊 ${dp.name} (real)`}
+                        stroke={COLORS[(filteredAccounts.length + i) % COLORS.length]}
+                        strokeWidth={1}
+                        strokeDasharray="3 6"
+                        dot={false}
+                        activeDot={{ r: 3 }}
+                      />
+                    ) : null
+                  )}
                   {data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0 && (
                     <Line
                       type="monotone"
@@ -930,6 +971,7 @@ export default function ProjectionPage() {
                       <th>Konto</th>
                       <th>Aktuell</th>
                       <th>Projiziert</th>
+                      {hasInflation && <th>Kaufkraftbereinigt</th>}
                       <th>Veränderung</th>
                       <th>⌀ mtl. Netto</th>
                       <th>Min</th>
@@ -942,6 +984,9 @@ export default function ProjectionPage() {
                         <td>{s.name}</td>
                         <td className="amount">{formatCurrency(s.startBalance)} €</td>
                         <td className="amount">{formatCurrency(s.endBalance)} €</td>
+                        {hasInflation && (
+                          <td className="amount">{s.adjustedEndBalance !== null ? formatCurrency(s.adjustedEndBalance) + " €" : "–"}</td>
+                        )}
                         <td className={`amount ${s.change >= 0 ? "amount-positive" : "amount-negative"}`}>
                           {s.change >= 0 ? "+" : ""}
                           {formatCurrency(s.change)} €
@@ -959,6 +1004,13 @@ export default function ProjectionPage() {
                         <td>Gesamt</td>
                         <td className="amount">{formatCurrency(totalStart)} €</td>
                         <td className="amount">{formatCurrency(totalEnd)} €</td>
+                        {hasInflation && (
+                          <td className="amount">
+                            {data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0
+                              ? formatCurrency(data.inflationAdjustedTotals[data.inflationAdjustedTotals.length - 1]?.balance ?? 0) + " €"
+                              : "–"}
+                          </td>
+                        )}
                         <td className={`amount ${totalChange >= 0 ? "amount-positive" : "amount-negative"}`}>
                           {totalChange >= 0 ? "+" : ""}
                           {formatCurrency(totalChange)} €
@@ -989,6 +1041,7 @@ export default function ProjectionPage() {
                       <th>Zinssatz</th>
                       <th>Aktuell</th>
                       <th>Projiziert</th>
+                      {hasInflation && <th>Kaufkraftbereinigt</th>}
                       <th>Veränderung</th>
                     </tr>
                   </thead>
@@ -997,12 +1050,18 @@ export default function ProjectionPage() {
                       const startBal = dp.dataPoints[0]?.balance ?? 0;
                       const endBal = dp.dataPoints[dp.dataPoints.length - 1]?.balance ?? 0;
                       const change = endBal - startBal;
+                      const adjEndBal = dp.inflationAdjustedDataPoints && dp.inflationAdjustedDataPoints.length > 0
+                        ? dp.inflationAdjustedDataPoints[dp.inflationAdjustedDataPoints.length - 1]?.balance ?? null
+                        : null;
                       return (
                         <tr key={dp.id}>
                           <td>📊 {dp.name}</td>
                           <td>{dp.interestRate.toFixed(2)} % p.a.</td>
                           <td className="amount">{formatCurrency(startBal)} €</td>
                           <td className="amount">{formatCurrency(endBal)} €</td>
+                          {hasInflation && (
+                            <td className="amount">{adjEndBal !== null ? formatCurrency(adjEndBal) + " €" : "–"}</td>
+                          )}
                           <td className={`amount ${change >= 0 ? "amount-positive" : "amount-negative"}`}>
                             {change >= 0 ? "+" : ""}
                             {formatCurrency(change)} €

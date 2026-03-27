@@ -20,19 +20,21 @@ type ProjectionDataPoint struct {
 
 // AccountProjection contains the projected balance over time for one account.
 type AccountProjection struct {
-	ID              uint                  `json:"id"`
-	Name            string                `json:"name"`
-	Currency        string                `json:"currency"`
-	DataPoints      []ProjectionDataPoint `json:"dataPoints"`
-	MonthlyNetFlow  float64               `json:"monthlyNetFlow"`
+	ID                          uint                  `json:"id"`
+	Name                        string                `json:"name"`
+	Currency                    string                `json:"currency"`
+	DataPoints                  []ProjectionDataPoint `json:"dataPoints"`
+	InflationAdjustedDataPoints []ProjectionDataPoint `json:"inflationAdjustedDataPoints,omitempty"`
+	MonthlyNetFlow              float64               `json:"monthlyNetFlow"`
 }
 
 // DepotProjection contains the projected value over time for one depot.
 type DepotProjection struct {
-	ID           uint                  `json:"id"`
-	Name         string                `json:"name"`
-	InterestRate float64               `json:"interestRate"`
-	DataPoints   []ProjectionDataPoint `json:"dataPoints"`
+	ID                          uint                  `json:"id"`
+	Name                        string                `json:"name"`
+	InterestRate                float64               `json:"interestRate"`
+	DataPoints                  []ProjectionDataPoint `json:"dataPoints"`
+	InflationAdjustedDataPoints []ProjectionDataPoint `json:"inflationAdjustedDataPoints,omitempty"`
 }
 
 // ProjectionResponse is the API response for the projection endpoint.
@@ -293,13 +295,26 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 		if len(pts) >= 1 && months > 0 {
 			monthlyNet = roundToTwoDecimals((pts[len(pts)-1].Balance - a.Balance) / float64(months))
 		}
-		result.Accounts = append(result.Accounts, AccountProjection{
+		ap := AccountProjection{
 			ID:             a.ID,
 			Name:           a.Name,
 			Currency:       a.Currency,
 			DataPoints:     pts,
 			MonthlyNetFlow: monthlyNet,
-		})
+		}
+		if inflationRate > 0 && len(pts) > 0 {
+			adjusted := make([]ProjectionDataPoint, len(pts))
+			for i, pt := range pts {
+				yearsFromStart := dates[i].Sub(startDate).Hours() / (24.0 * 365.25)
+				discountFactor := math.Pow(1+inflationRate/100.0, yearsFromStart)
+				adjusted[i] = ProjectionDataPoint{
+					Date:    pt.Date,
+					Balance: roundToTwoDecimals(pt.Balance / discountFactor),
+				}
+			}
+			ap.InflationAdjustedDataPoints = adjusted
+		}
+		result.Accounts = append(result.Accounts, ap)
 	}
 
 	// Build depot projections: aggregate linked account balances and apply compound interest
@@ -351,6 +366,25 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 		}
 
 		result.Depots = append(result.Depots, dp)
+	}
+
+	// Compute inflation-adjusted data points for depots
+	if inflationRate > 0 {
+		for i := range result.Depots {
+			pts := result.Depots[i].DataPoints
+			if len(pts) > 0 {
+				adjusted := make([]ProjectionDataPoint, len(pts))
+				for j, pt := range pts {
+					yearsFromStart := dates[j].Sub(startDate).Hours() / (24.0 * 365.25)
+					discountFactor := math.Pow(1+inflationRate/100.0, yearsFromStart)
+					adjusted[j] = ProjectionDataPoint{
+						Date:    pt.Date,
+						Balance: roundToTwoDecimals(pt.Balance / discountFactor),
+					}
+				}
+				result.Depots[i].InflationAdjustedDataPoints = adjusted
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, result)
