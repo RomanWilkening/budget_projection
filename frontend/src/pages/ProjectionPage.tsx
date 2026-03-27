@@ -378,11 +378,15 @@ export default function ProjectionPage() {
               type="number"
               min="1"
               max="50"
-              placeholder="Jahre"
+              placeholder="z.B. 10"
               value={customYears}
               onChange={(e) => {
                 const val = e.target.value;
                 setCustomYears(val);
+                if (val === "") {
+                  setMonths(6);
+                  return;
+                }
                 const num = parseInt(val, 10);
                 if (num >= 1 && num <= 50) {
                   setMonths(num * 12);
