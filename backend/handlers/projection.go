@@ -4,6 +4,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/RomanWilkening/budget_projection/backend/database"
@@ -36,9 +37,10 @@ type DepotProjection struct {
 
 // ProjectionResponse is the API response for the projection endpoint.
 type ProjectionResponse struct {
-	Accounts []AccountProjection   `json:"accounts"`
-	Depots   []DepotProjection     `json:"depots"`
-	Totals   []ProjectionDataPoint `json:"totals"`
+	Accounts               []AccountProjection   `json:"accounts"`
+	Depots                 []DepotProjection     `json:"depots"`
+	Totals                 []ProjectionDataPoint `json:"totals"`
+	InflationAdjustedTotals []ProjectionDataPoint `json:"inflationAdjustedTotals,omitempty"`
 }
 
 // ScenarioRequest contains temporary position modifications for scenario projections.
@@ -106,6 +108,14 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 		}
 	}
 
+	// Parse inflation rate (annual percent, e.g. 2.0 = 2%)
+	inflationRate := 0.0
+	if ir := c.Query("inflationRate"); ir != "" {
+		if parsed, err := strconv.ParseFloat(ir, 64); err == nil && parsed >= 0 && parsed <= 100 {
+			inflationRate = parsed
+		}
+	}
+
 	// Load accounts, positions, and depots
 	var accounts []models.Account
 	if err := database.DB.Find(&accounts).Error; err != nil {
@@ -150,13 +160,21 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 	for _, pos := range positions {
 		occurrences := generateOccurrences(pos, startDate, endDate)
 		for _, date := range occurrences {
+			// Apply per-position growth rate: scale amount by (1 + rate/100)^yearsElapsed
+			amount := pos.Amount
+			if pos.GrowthRate != 0 {
+				yearsElapsed := date.Sub(pos.StartDate.Time).Hours() / (24.0 * 365.25)
+				if yearsElapsed > 0 {
+					amount = pos.Amount * math.Pow(1+pos.GrowthRate/100.0, yearsElapsed)
+				}
+			}
 			switch pos.Type {
 			case models.PositionIncome:
 				if pos.AccountID != nil {
 					events = append(events, balanceEvent{
 						date:      date,
 						accountID: *pos.AccountID,
-						amount:    pos.Amount,
+						amount:    amount,
 					})
 				}
 				// Optional: debit source account
@@ -164,7 +182,7 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 					events = append(events, balanceEvent{
 						date:      date,
 						accountID: *pos.SourceAccountID,
-						amount:    -pos.Amount,
+						amount:    -amount,
 					})
 				}
 			case models.PositionExpense:
@@ -172,7 +190,7 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 					events = append(events, balanceEvent{
 						date:      date,
 						accountID: *pos.AccountID,
-						amount:    -pos.Amount,
+						amount:    -amount,
 					})
 				}
 				// Optional: credit target account
@@ -180,7 +198,7 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 					events = append(events, balanceEvent{
 						date:      date,
 						accountID: *pos.TargetAccountID,
-						amount:    pos.Amount,
+						amount:    amount,
 					})
 				}
 			case models.PositionTransfer:
@@ -188,14 +206,14 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 					events = append(events, balanceEvent{
 						date:      date,
 						accountID: *pos.SourceAccountID,
-						amount:    -pos.Amount,
+						amount:    -amount,
 					})
 				}
 				if pos.TargetAccountID != nil {
 					events = append(events, balanceEvent{
 						date:      date,
 						accountID: *pos.TargetAccountID,
-						amount:    pos.Amount,
+						amount:    amount,
 					})
 				}
 			}
@@ -254,6 +272,20 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 		Accounts: make([]AccountProjection, 0, len(accounts)),
 		Depots:   make([]DepotProjection, 0, len(depots)),
 		Totals:   totals,
+	}
+
+	// Compute inflation-adjusted totals if inflation rate is set
+	if inflationRate > 0 && len(totals) > 0 {
+		adjustedTotals := make([]ProjectionDataPoint, len(totals))
+		for i, tp := range totals {
+			yearsFromStart := dates[i].Sub(startDate).Hours() / (24.0 * 365.25)
+			discountFactor := math.Pow(1+inflationRate/100.0, yearsFromStart)
+			adjustedTotals[i] = ProjectionDataPoint{
+				Date:    tp.Date,
+				Balance: roundToTwoDecimals(tp.Balance / discountFactor),
+			}
+		}
+		result.InflationAdjustedTotals = adjustedTotals
 	}
 	for _, a := range accounts {
 		pts := accountProjections[a.ID]
