@@ -81,8 +81,8 @@ func projectionHandler(c *gin.Context, scenario *ScenarioRequest) {
 	if months < 1 {
 		months = 1
 	}
-	if months > 120 {
-		months = 120
+	if months > 600 {
+		months = 600
 	}
 
 	startDate := time.Now().Truncate(24 * time.Hour)

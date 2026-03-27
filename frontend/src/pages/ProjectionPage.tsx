@@ -93,6 +93,7 @@ const emptyNewPosition: NewPositionForm = {
 
 export default function ProjectionPage() {
   const [months, setMonths] = useState(6);
+  const [customYears, setCustomYears] = useState("");
   const [data, setData] = useState<ProjectionResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -366,12 +367,35 @@ export default function ProjectionPage() {
           {MONTH_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              className={`btn btn-sm ${months === opt.value ? "btn-primary" : "btn-secondary"}`}
-              onClick={() => setMonths(opt.value)}
+              className={`btn btn-sm ${months === opt.value && customYears === "" ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => { setMonths(opt.value); setCustomYears(""); }}
             >
               {opt.label}
             </button>
           ))}
+          <div className="custom-years-input">
+            <input
+              type="number"
+              min="1"
+              max="50"
+              placeholder="z.B. 10"
+              value={customYears}
+              onChange={(e) => {
+                const val = e.target.value;
+                setCustomYears(val);
+                if (val === "") {
+                  setMonths(6);
+                  return;
+                }
+                const num = parseInt(val, 10);
+                if (num >= 1 && num <= 50) {
+                  setMonths(num * 12);
+                }
+              }}
+              className="input-sm"
+            />
+            <span className="custom-years-label">Jahre</span>
+          </div>
         </div>
       </div>
 
