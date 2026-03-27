@@ -116,6 +116,8 @@ export default function ProjectionPage() {
   const [showNewPosForm, setShowNewPosForm] = useState(false);
   const [newPosForm, setNewPosForm] = useState<NewPositionForm>({ ...emptyNewPosition });
   const [applyingScenario, setApplyingScenario] = useState(false);
+  // Applied scenario: only this drives the projection fetch (not the editing state)
+  const [appliedScenarioMod, setAppliedScenarioMod] = useState<ScenarioModification | null>(null);
 
   // Inflation state
   const [inflationRate, setInflationRate] = useState(0);
@@ -124,7 +126,7 @@ export default function ProjectionPage() {
 
   const hasScenarioChanges = removedPositionIds.size > 0 || modifiedAmounts.size > 0 || modifiedGrowthRates.size > 0 || newPositions.length > 0;
 
-  // Build the scenario modification object
+  // Build the scenario modification object (represents current editing state)
   const scenarioMod = useMemo((): ScenarioModification | null => {
     if (!hasScenarioChanges) return null;
     // Collect all position IDs that have any modification
@@ -146,6 +148,16 @@ export default function ProjectionPage() {
     };
   }, [hasScenarioChanges, modifiedAmounts, modifiedGrowthRates, removedPositionIds, newPositions, positions]);
 
+  // Track whether editing state differs from last applied state
+  const hasUnappliedChanges = useMemo(() => {
+    return JSON.stringify(scenarioMod) !== JSON.stringify(appliedScenarioMod);
+  }, [scenarioMod, appliedScenarioMod]);
+
+  // Apply current scenario edits to the projection
+  const applyScenarioToProjection = () => {
+    setAppliedScenarioMod(scenarioMod);
+  };
+
   // Fetch persons, accounts, depots, and positions once on mount
   useEffect(() => {
     Promise.all([getPersons(), getAccounts(), getDepots(), getPositions()])
@@ -161,14 +173,14 @@ export default function ProjectionPage() {
       .catch(() => { /* filter panel will simply not render */ });
   }, []);
 
-  // Fetch projection data (with or without scenario)
+  // Fetch projection data (with or without applied scenario)
   const fetchProjection = useCallback(() => {
     setLoading(true);
     setError("");
 
     const inflParam = inflationRate > 0 ? inflationRate : undefined;
-    const promise = scenarioMod
-      ? getProjectionWithScenario({ months, startDate: today, inflationRate: inflParam, scenario: scenarioMod })
+    const promise = appliedScenarioMod
+      ? getProjectionWithScenario({ months, startDate: today, inflationRate: inflParam, scenario: appliedScenarioMod })
       : getProjection({ months, startDate: today, inflationRate: inflParam });
 
     let cancelled = false;
@@ -183,7 +195,7 @@ export default function ProjectionPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [months, today, scenarioMod, inflationRate]);
+  }, [months, today, appliedScenarioMod, inflationRate]);
 
   useEffect(() => {
     return fetchProjection();
@@ -275,6 +287,7 @@ export default function ProjectionPage() {
     setModifiedAmounts(new Map());
     setModifiedGrowthRates(new Map());
     setNewPositions([]);
+    setAppliedScenarioMod(null);
   };
 
   // Scenario: apply all changes to actual positions in the database
@@ -584,14 +597,21 @@ export default function ProjectionPage() {
             {scenarioOpen && (
               <div className="scenario-content">
                 <p className="scenario-hint">
-                  Passen Sie Positionen temporär an, um verschiedene Szenarien zu simulieren.
-                  Mit „Änderungen übernehmen" können Sie die Änderungen in die Positionen speichern.
+                  Passen Sie Positionen temporär an und klicken Sie „Szenario simulieren", um die Projektion zu aktualisieren.
+                  Mit „Änderungen übernehmen" können Sie die Änderungen dauerhaft in die Positionen speichern.
                 </p>
 
                 {hasScenarioChanges && (
                   <div className="scenario-actions">
                     <button className="btn btn-sm btn-secondary" onClick={resetScenario}>
                       Szenario zurücksetzen
+                    </button>
+                    <button
+                      className="btn btn-sm btn-success"
+                      onClick={applyScenarioToProjection}
+                      disabled={!hasUnappliedChanges}
+                    >
+                      Szenario simulieren
                     </button>
                     <button
                       className="btn btn-sm btn-primary"
