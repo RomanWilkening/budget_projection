@@ -72,11 +72,13 @@ export const getProjection = (params: {
   months?: number;
   startDate?: string;
   granularity?: string;
+  inflationRate?: number;
 }) => {
   const query = new URLSearchParams();
   if (params.months) query.set("months", String(params.months));
   if (params.startDate) query.set("startDate", params.startDate);
   if (params.granularity) query.set("granularity", params.granularity);
+  if (params.inflationRate) query.set("inflationRate", String(params.inflationRate));
   return request<ProjectionResponse>(`${BASE}/projection?${query.toString()}`);
 };
 
@@ -84,12 +86,14 @@ export const getProjectionWithScenario = (params: {
   months?: number;
   startDate?: string;
   granularity?: string;
+  inflationRate?: number;
   scenario: ScenarioModification;
 }) => {
   const query = new URLSearchParams();
   if (params.months) query.set("months", String(params.months));
   if (params.startDate) query.set("startDate", params.startDate);
   if (params.granularity) query.set("granularity", params.granularity);
+  if (params.inflationRate) query.set("inflationRate", String(params.inflationRate));
   return request<ProjectionResponse>(`${BASE}/projection?${query.toString()}`, {
     method: "POST",
     body: JSON.stringify(params.scenario),

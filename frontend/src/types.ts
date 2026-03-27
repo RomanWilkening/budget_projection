@@ -56,6 +56,7 @@ export interface Position {
   businessDayRule: BusinessDayRule;
   startDate: string;
   endDate?: string;
+  growthRate: number;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -86,6 +87,7 @@ export interface ProjectionResponse {
   accounts: AccountProjection[];
   depots: DepotProjection[];
   totals: ProjectionDataPoint[];
+  inflationAdjustedTotals?: ProjectionDataPoint[];
 }
 
 export interface Depot {

@@ -55,6 +55,7 @@ interface FormState {
   businessDayRule: BusinessDayRule;
   startDate: string;
   endDate: string;
+  growthRate: string;
 }
 
 const emptyForm: FormState = {
@@ -72,6 +73,7 @@ const emptyForm: FormState = {
   businessDayRule: "exact",
   startDate: new Date().toISOString().slice(0, 10),
   endDate: "",
+  growthRate: "0",
 };
 
 // Unified list item: either a position or a separator
@@ -223,6 +225,7 @@ export default function PositionsPage() {
       businessDayRule: p.businessDayRule as BusinessDayRule,
       startDate: p.startDate.slice(0, 10),
       endDate: p.endDate ? p.endDate.slice(0, 10) : "",
+      growthRate: String(p.growthRate ?? 0),
     });
     setFormError("");
     setShowForm(true);
@@ -275,6 +278,7 @@ export default function PositionsPage() {
       interval: parseInt(form.interval) || 1,
       businessDayRule: form.businessDayRule,
       startDate: form.startDate,
+      growthRate: parseFloat(form.growthRate) || 0,
     };
 
     if (form.type === "transfer") {
@@ -422,6 +426,7 @@ export default function PositionsPage() {
                 <th>Name</th>
                 <th>Typ</th>
                 <th>Betrag</th>
+                <th>Änderung p.a.</th>
                 <th>Konto</th>
                 <th>Frequenz</th>
                 <th>Startdatum</th>
@@ -445,7 +450,7 @@ export default function PositionsPage() {
                       onDrop={(e) => handleDrop(e, index)}
                     >
                       <td className="drag-handle">⠿</td>
-                      <td colSpan={5} className="separator-cell">
+                      <td colSpan={6} className="separator-cell">
                         {editingSeparator?.id === sep.id ? (
                           <span className="separator-edit-inline">
                             <input
@@ -507,6 +512,9 @@ export default function PositionsPage() {
                         {p.amount.toLocaleString("de-DE", { minimumFractionDigits: 2 })} €
                       </span>
                     </td>
+                    <td>
+                      {p.growthRate ? `${p.growthRate.toLocaleString("de-DE", { minimumFractionDigits: 1 })} %` : "–"}
+                    </td>
                     <td>{formatAccountDisplay(p)}</td>
                     <td>{freqLabel(p.frequencyType)}</td>
                     <td>{new Date(p.startDate).toLocaleDateString("de-DE")}</td>
@@ -566,6 +574,16 @@ export default function PositionsPage() {
                     min="0"
                     value={form.amount}
                     onChange={(e) => setField("amount", e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Änderung p.a. (%)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={form.growthRate}
+                    onChange={(e) => setField("growthRate", e.target.value)}
+                    placeholder="z.B. 2.0"
                   />
                 </div>
               </div>

@@ -113,6 +113,9 @@ export default function ProjectionPage() {
   const [showNewPosForm, setShowNewPosForm] = useState(false);
   const [newPosForm, setNewPosForm] = useState<NewPositionForm>({ ...emptyNewPosition });
 
+  // Inflation state
+  const [inflationRate, setInflationRate] = useState(0);
+
   const today = useMemo(() => new Date().toISOString().split("T")[0], []);
 
   const hasScenarioChanges = removedPositionIds.size > 0 || modifiedAmounts.size > 0 || newPositions.length > 0;
@@ -154,9 +157,10 @@ export default function ProjectionPage() {
     setLoading(true);
     setError("");
 
+    const inflParam = inflationRate > 0 ? inflationRate : undefined;
     const promise = scenarioMod
-      ? getProjectionWithScenario({ months, startDate: today, scenario: scenarioMod })
-      : getProjection({ months, startDate: today });
+      ? getProjectionWithScenario({ months, startDate: today, inflationRate: inflParam, scenario: scenarioMod })
+      : getProjection({ months, startDate: today, inflationRate: inflParam });
 
     let cancelled = false;
     promise
@@ -170,7 +174,7 @@ export default function ProjectionPage() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [months, today, scenarioMod]);
+  }, [months, today, scenarioMod, inflationRate]);
 
   useEffect(() => {
     return fetchProjection();
@@ -330,6 +334,10 @@ export default function ProjectionPage() {
           const bal = dp.dataPoints[i]?.balance ?? 0;
           row[`📊 ${dp.name}`] = bal;
         }
+        // Add inflation-adjusted total line
+        if (data.inflationAdjustedTotals && data.inflationAdjustedTotals[i]) {
+          row["Gesamt (inflationsbereinigt)"] = data.inflationAdjustedTotals[i].balance;
+        }
         return row;
       })
     : [];
@@ -395,6 +403,29 @@ export default function ProjectionPage() {
               className="input-sm"
             />
             <span className="custom-years-label">Jahre</span>
+          </div>
+          <div className="custom-years-input">
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              placeholder="z.B. 2.0"
+              value={inflationRate || ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === "") {
+                  setInflationRate(0);
+                  return;
+                }
+                const num = parseFloat(val);
+                if (!isNaN(num) && num >= 0 && num <= 100) {
+                  setInflationRate(num);
+                }
+              }}
+              className="input-sm"
+            />
+            <span className="custom-years-label">% Inflation</span>
           </div>
         </div>
       </div>
@@ -791,11 +822,21 @@ export default function ProjectionPage() {
               </div>
               <div className="stat-label">Veränderung (€)</div>
             </div>
-            <div className="card stat-card">
-              <div className="stat-icon">🏦</div>
-              <div className="stat-value">{filteredAccounts.length}</div>
-              <div className="stat-label">Konten</div>
-            </div>
+            {data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0 ? (
+              <div className="card stat-card">
+                <div className="stat-icon">📉</div>
+                <div className="stat-value">
+                  {formatCurrency(data.inflationAdjustedTotals[data.inflationAdjustedTotals.length - 1]?.balance ?? 0)}
+                </div>
+                <div className="stat-label">Kaufkraftbereinigt (€)</div>
+              </div>
+            ) : (
+              <div className="card stat-card">
+                <div className="stat-icon">🏦</div>
+                <div className="stat-value">{filteredAccounts.length}</div>
+                <div className="stat-label">Konten</div>
+              </div>
+            )}
           </div>
 
           {/* Main Chart */}
@@ -855,6 +896,17 @@ export default function ProjectionPage() {
                       activeDot={{ r: 4 }}
                     />
                   ))}
+                  {data?.inflationAdjustedTotals && data.inflationAdjustedTotals.length > 0 && (
+                    <Line
+                      type="monotone"
+                      dataKey="Gesamt (inflationsbereinigt)"
+                      stroke="#e53e3e"
+                      strokeWidth={2}
+                      strokeDasharray="3 6"
+                      dot={false}
+                      activeDot={{ r: 4 }}
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </div>
